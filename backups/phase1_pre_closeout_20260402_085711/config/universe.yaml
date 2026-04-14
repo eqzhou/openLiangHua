@@ -1,0 +1,30 @@
+data_source: myquant
+benchmark: 000905.SH
+mode: current_index
+index_code: 000905.SH
+listing_days_min: 120
+strict_st_filter: false
+strict_limit_filter: false
+watch_symbols:
+  - 000078.SZ
+symbols:
+  - 000001.SZ
+  - 000333.SZ
+  - 000651.SZ
+  - 000858.SZ
+  - 002142.SZ
+  - 002415.SZ
+  - 002594.SZ
+  - 300059.SZ
+  - 300760.SZ
+  - 600036.SH
+  - 600276.SH
+  - 600519.SH
+  - 600887.SH
+  - 601012.SH
+  - 601318.SH
+  - 601398.SH
+  - 601668.SH
+  - 601888.SH
+  - 603259.SH
+  - 688111.SH

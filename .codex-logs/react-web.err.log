@@ -1,0 +1,33 @@
+[2m14:47:58[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22m[vite] Failed to reload /src/pages/WatchlistPage.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+[2m14:52:41[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] Error:[0m Unexpected token
+    [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/components/RealtimeStatusBanner.tsx:62:3 [38;5;246m][0m
+    [38;5;246m│[0m
+ [38;5;246m62 │[0m [38;5;249m [0m[38;5;249m [0m*[38;5;249m,[0m
+ [38;5;240m   │[0m   ┬  
+ [38;5;240m   │[0m   ╰── 
+[38;5;246m────╯[0m
+
+  Plugin: [35mvite:oxc[39m
+  File: [36mD:/openlianghua/web/src/components/RealtimeStatusBanner.tsx[39m
+[2m14:52:41[22m [31m[1m[vite][22m[39m [31mInternal server error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] Error:[0m Unexpected token
+    [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/components/RealtimeStatusBanner.tsx:62:3 [38;5;246m][0m
+    [38;5;246m│[0m
+ [38;5;246m62 │[0m [38;5;249m [0m[38;5;249m [0m*[38;5;249m,[0m
+ [38;5;240m   │[0m   ┬  
+ [38;5;240m   │[0m   ╰── 
+[38;5;246m────╯[0m
+[39m
+  Plugin: [35mvite:oxc[39m
+  File: [36mD:/openlianghua/web/src/components/RealtimeStatusBanner.tsx[39m
+      at transformWithOxc (file:///D:/openlianghua/web/node_modules/vite/dist/node/chunks/node.js:3720:19)
+      at TransformPluginContext.transform (file:///D:/openlianghua/web/node_modules/vite/dist/node/chunks/node.js:3788:26)
+      at EnvironmentPluginContainer.transform (file:///D:/openlianghua/web/node_modules/vite/dist/node/chunks/node.js:30048:51)
+      at async loadAndTransform (file:///D:/openlianghua/web/node_modules/vite/dist/node/chunks/node.js:24177:26)
+      at async viteTransformMiddleware (file:///D:/openlianghua/web/node_modules/vite/dist/node/chunks/node.js:24986:20)
+[2m14:52:41[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22m[vite] Failed to reload /src/pages/WatchlistPage.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+[2m14:53:08[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22m[vite] Failed to reload /src/components/QueryNotice.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+[2m14:54:56[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22m[vite] Failed to reload /src/components/QueryNotice.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)

@@ -1,0 +1,72 @@
+train_start: 2018-01-01
+train_end: 2022-12-31
+valid_end: 2023-12-31
+test_end: 2026-04-01
+label_col: ret_t1_t10
+top_n: 20
+rolling:
+  enabled: true
+  retrain_frequency: monthly
+  train_window_size: 756
+  min_history_size: 252
+portfolio:
+  hold_buffer: 5
+selection:
+  neutralize_by_industry: true
+  industry_column: industry
+  min_industry_size: 10
+  max_per_industry: 2
+filters:
+  exclude_current_name_st: true
+  require_can_enter_next_day: true
+  require_label_valid: true
+  min_listing_days: 365
+risk_filter:
+  enabled: true
+  benchmark_code: 000905.SH
+  use_index_members_only: true
+  ma_window: 150
+  require_price_above_ma: true
+  require_ma_slope_positive: false
+  slope_window: 20
+  cash_return: 0.0
+overlay:
+  split: test
+  candidate_pool_size: 30
+  top_n: 10
+  weight_mode: validation_adaptive
+  weight_evaluation_split: valid
+  min_model_weight: 0.2
+  lgbm_weight: 0.6
+  ridge_weight: 0.4
+  quant_weight: 0.7
+  factor_weight: 0.2
+  consensus_weight: 0.1
+  notice_lookback_days: 7
+  notice_max_items: 3
+  news_lookback_days: 7
+  news_max_items: 3
+  research_lookback_days: 30
+  research_max_items: 3
+feature_selection:
+  enabled: true
+  max_missing_rate: 0.45
+  min_abs_rank_ic: 0.01
+  min_rank_ic_days: 120
+  min_ic_observations: 20
+  correlation_threshold: 0.9
+  correlation_sample_size: 80000
+  max_features: 8
+  exclude_features:
+    - index_weight
+lgbm:
+  n_estimators: 250
+  learning_rate: 0.03
+  num_leaves: 15
+  max_depth: 5
+  subsample: 0.7
+  colsample_bytree: 0.7
+  random_state: 42
+  min_child_samples: 150
+  reg_lambda: 5.0
+  reg_alpha: 1.0

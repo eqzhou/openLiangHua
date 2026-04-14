@@ -1,0 +1,29 @@
+numpy
+pandas
+polars
+pyarrow
+scipy
+statsmodels
+duckdb
+scikit-learn
+lightgbm
+tushare
+akshare
+streamlit
+jupyterlab
+matplotlib
+seaborn
+plotly
+python-dotenv
+pyyaml
+tqdm
+loguru
+openai
+fastapi
+uvicorn
+psycopg[binary]
+# Optional if you want to pull data from 掘金量化 / MyQuant.
+# Install it in a supported Python 3.11/3.12 environment:
+# gm
+# Optional in phase 2, and usually better on Python 3.11/3.12:
+# pyqlib

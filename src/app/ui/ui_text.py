@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+APP_TITLE = "A股量化研究平台"
+APP_CAPTION = "界面已经尽量改成中文投研表达，重点是让你能直接看懂数据状态、因子含义、模型结果和候选股票。"
+
+PAGE_OVERVIEW = "平台总览"
+PAGE_FACTOR_EXPLORER = "因子探索"
+PAGE_MODEL_BACKTEST = "模型回测"
+PAGE_CANDIDATES = "候选股票"
+PAGE_WATCHLIST = "观察持仓"
+PAGE_AI_REVIEW = "AI研判"
+PAGE_SERVICE = "页面服务"
+
+PAGE_OPTIONS = [
+    PAGE_OVERVIEW,
+    PAGE_FACTOR_EXPLORER,
+    PAGE_MODEL_BACKTEST,
+    PAGE_CANDIDATES,
+    PAGE_WATCHLIST,
+    PAGE_AI_REVIEW,
+    PAGE_SERVICE,
+]
+
+WORKSPACE_LABEL = "工作区"
+
+SIDEBAR_SERVICE_HEADER = "页面服务"
+SIDEBAR_SERVICE_STATUS_LABEL = "服务状态"
+SIDEBAR_WATCHLIST_ENTRY_LABEL = "观察池条目"
+SIDEBAR_PORT_LABEL = "8501 端口"
+SIDEBAR_PORT_ACTIVE = "监听中"
+SIDEBAR_PORT_INACTIVE = "未监听"
+SIDEBAR_REFRESH_NOTE = "页面刷新不再自动执行下载或实时行情抓取；这类重操作只会在你明确点击按钮后执行。"
+SIDEBAR_DOWNLOAD_NOTE = "下载任务已从页面移出，后续请在单独的 CMD 或 PowerShell 窗口执行。"
+
+SIDEBAR_CONFIG_HEADER = "研究参数"
+CONFIG_TRAIN_START_LABEL = "训练起始日期"
+CONFIG_TRAIN_END_LABEL = "训练截止日期"
+CONFIG_VALID_END_LABEL = "验证截止日期"
+CONFIG_TEST_END_LABEL = "测试截止日期"
+CONFIG_LABEL_COL_LABEL = "标签周期"
+CONFIG_TOP_N_LABEL = "候选股票数量 (Top N)"
+CONFIG_SUBMIT_LABEL = "保存研究参数"
+CONFIG_INVALID_DATES_MESSAGE = "日期顺序不合法，请确认：训练起始 <= 训练截止 <= 验证截止 <= 测试截止。"
+CONFIG_SAVE_SUCCESS_MESSAGE = "研究参数已保存到 config/experiment.yaml。"
+
+SIDEBAR_ACTIONS_HEADER = "研究操作"
+CLEAR_CACHE_LABEL = "清空页面缓存"
+CLEAR_CACHE_SUCCESS_MESSAGE = "页面缓存已清空。"
+CURRENT_CONFIG_PREFIX = "当前研究参数："
+

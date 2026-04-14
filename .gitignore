@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.pytest_cache/
+data/raw/
+data/staging/
+data/features/
+data/labels/
+data/qlib/
+reports/figures/
+reports/weekly/

@@ -1,0 +1,6 @@
+buy_commission_bps: 3
+sell_commission_bps: 3
+sell_tax_bps: 10
+slippage_bps: 5
+min_commission_cny: 5
+trading_days_per_year: 252

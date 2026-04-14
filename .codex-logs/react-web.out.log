@@ -1,0 +1,45 @@
+
+> openlianghua-react-web@0.0.0 dev
+> vite --host 0.0.0.0 --port 5173
+
+Port 5173 is in use, trying another one...
+
+  [32m[1mVITE[22m v8.0.3[39m  [2mready in [0m[1m142[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5174[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://172.19.0.1:[1m5174[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.21.13:[1m5174[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://172.27.144.1:[1m5174[22m/[39m
+[2m12:21:35[22m [36m[1m[vite][22m[39m [32mvite.config.ts changed, restarting server...[39m
+[2m12:21:35[22m [36m[1m[vite][22m[39m server restarted.
+[2m13:22:20[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/layout/AppLayout.tsx[22m
+[2m13:23:05[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/WorkbenchPage.tsx[22m
+[2m13:23:53[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/AiReviewPage.tsx[22m
+[2m13:26:02[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/WatchlistPage.tsx[22m
+[2m13:32:04[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m13:32:23[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/QueryNotice.tsx[22m
+[2m13:32:44[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/LoginDialog.tsx[22m
+[2m13:50:11[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/CandidatesPage.tsx[22m
+[2m13:51:30[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/CandidatesPage.tsx[22m
+[2m14:47:58[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/WatchlistPage.tsx[22m
+[2m14:52:41[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/WatchlistPage.tsx[22m
+[2m14:53:00[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/index.css[22m
+[2m14:53:08[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/QueryNotice.tsx[22m
+[2m14:53:16[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/QueryNotice.tsx[22m
+[2m14:54:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/QueryNotice.tsx[22m
+[2m14:55:06[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/QueryNotice.tsx[22m
+[2m14:55:48[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/WatchlistPage.tsx[22m
+[2m15:05:31[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/RealtimeStatusBanner.tsx[22m
+[2m15:06:02[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/WatchlistPage.tsx[22m
+[2m15:06:16[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/QueryNotice.tsx[22m
+[2m15:06:47[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/WatchlistPage.tsx[22m
+[2m15:27:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m15:27:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/LoginDialog.tsx[22m
+[2m15:27:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/OverviewPage.tsx, /src/components/MetricCard.tsx, /src/components/DataTable.tsx, /src/pages/FactorExplorerPage.tsx, /src/pages/CandidatesPage.tsx, /src/pages/ModelBacktestPage.tsx, /src/pages/AiReviewPage.tsx, /src/pages/WatchlistPage.tsx, /src/components/RealtimeStatusBanner.tsx[22m
+[2m15:27:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/AiReviewPage.tsx[22m
+[2m15:27:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/CandidatesPage.tsx[22m
+[2m15:27:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/FactorExplorerPage.tsx[22m
+[2m15:27:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ModelBacktestPage.tsx[22m
+[2m15:27:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/OverviewPage.tsx[22m
+[2m15:27:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/WatchlistPage.tsx[22m
+[2m15:27:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/WorkbenchPage.tsx[22m
