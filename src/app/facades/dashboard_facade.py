@@ -18,7 +18,7 @@ from src.app.viewmodels.factor_explorer_vm import (
 )
 from src.app.viewmodels.model_backtest_vm import build_monthly_summary, normalize_regime_view
 from src.app.viewmodels.overview_vm import build_equity_curve_frame, build_model_comparison_frame
-from src.app.repositories.report_repository import read_jsonl_records, read_text
+from src.app.services.data_management_service import build_data_management_payload
 from src.app.services.dashboard_data_service import (
     ACTIVE_DATA_SOURCE,
     FIELD_EXPLANATIONS,
@@ -48,6 +48,8 @@ from src.app.services.dashboard_data_service import (
     load_overlay_candidates,
     load_overlay_inference_brief,
     load_overlay_inference_candidates,
+    load_overlay_inference_shortlist,
+    load_overlay_llm_bundle,
     load_overlay_inference_packet,
     load_overlay_packet,
     load_portfolio,
@@ -61,8 +63,11 @@ from src.app.services.dashboard_data_service import (
 from src.app.services.realtime_quote_service import fetch_managed_realtime_quotes, merge_realtime_quotes
 from src.app.services.streamlit_runtime_service import get_streamlit_service_status
 from src.app.services.watchlist_service import build_reduce_plan, filtered_watchlist_view
+from src.data.tushare_workflows import run_tushare_full_refresh, run_tushare_incremental_refresh
 from src.db.realtime_quote_store import get_realtime_quote_store
+from src.utils.data_source import active_data_source
 from src.utils.llm_discussion import discussion_round_rows
+
 
 def _json_ready(value: Any) -> Any:
     if isinstance(value, Path):
@@ -350,6 +355,7 @@ def _get_home_payload_cached() -> dict[str, Any]:
             "inferenceRecords": _json_ready(inference_records),
             "historicalRecords": _json_ready(historical_records),
             "focusRecord": _json_ready(focus_candidate_record),
+            "shortlistMarkdown": load_overlay_inference_shortlist(),
         },
         "alerts": _json_ready(
             _build_home_alerts(
@@ -611,6 +617,23 @@ def _watchlist_overview_payload(frame: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def _refresh_watchlist_realtime_snapshot(
+    *,
+    now: pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any], list[str], dict[str, float]]:
+    watchlist_view = build_watchlist_base_frame()
+    symbols, previous_close_lookup = _watchlist_realtime_context(watchlist_view)
+    if not symbols:
+        return pd.DataFrame(), _decorate_realtime_status(_empty_realtime_status()), symbols, previous_close_lookup
+
+    realtime_quotes, realtime_status = fetch_managed_realtime_quotes(
+        symbols,
+        previous_close_lookup=previous_close_lookup,
+        now=now or pd.Timestamp.now(tz="Asia/Shanghai"),
+    )
+    return realtime_quotes, _decorate_realtime_status(realtime_status), symbols, previous_close_lookup
+
+
 def _resolve_watchlist_view(
     *,
     keyword: str = "",
@@ -623,13 +646,7 @@ def _resolve_watchlist_view(
     realtime_status = _empty_realtime_status()
     if not watchlist_view.empty:
         if include_realtime:
-            symbols, previous_close_lookup = _watchlist_realtime_context(watchlist_view)
-            realtime_quotes, realtime_status = fetch_managed_realtime_quotes(
-                symbols,
-                previous_close_lookup=previous_close_lookup,
-                trade_date=pd.Timestamp.now(tz="Asia/Shanghai"),
-            )
-            realtime_status = _decorate_realtime_status(realtime_status)
+            realtime_quotes, realtime_status, _, _ = _refresh_watchlist_realtime_snapshot()
             if not realtime_quotes.empty:
                 watchlist_view = merge_realtime_quotes(watchlist_view, realtime_quotes)
         else:
@@ -758,10 +775,11 @@ def get_watchlist_payload(
         detail = _json_ready(row.to_dict())
         reduce_plan = build_reduce_plan(row)
         history_source = load_predictions("ensemble", "test")
-        history = history_source.loc[
-            history_source["ts_code"] == selected_symbol,
-            ["trade_date", "score"],
-        ].sort_values("trade_date").tail(120)
+        if not history_source.empty and {"ts_code", "trade_date", "score"}.issubset(history_source.columns):
+            history = history_source.loc[
+                history_source["ts_code"] == selected_symbol,
+                ["trade_date", "score"],
+            ].sort_values("trade_date").tail(120)
         discussion_snapshot = row.get("llm_discussion_snapshot")
         if isinstance(discussion_snapshot, dict):
             discussion_rows = discussion_round_rows(discussion_snapshot)
@@ -888,10 +906,11 @@ def get_watchlist_detail_payload(
         detail = _json_ready(row.to_dict())
         reduce_plan = build_reduce_plan(row)
         history_source = load_predictions("ensemble", "test")
-        history = history_source.loc[
-            history_source["ts_code"] == selected_symbol,
-            ["trade_date", "score"],
-        ].sort_values("trade_date").tail(120)
+        if not history_source.empty and {"ts_code", "trade_date", "score"}.issubset(history_source.columns):
+            history = history_source.loc[
+                history_source["ts_code"] == selected_symbol,
+                ["trade_date", "score"],
+            ].sort_values("trade_date").tail(120)
         discussion_snapshot = row.get("llm_discussion_snapshot")
         if isinstance(discussion_snapshot, dict):
             discussion_rows = discussion_round_rows(discussion_snapshot)
@@ -906,6 +925,7 @@ def get_watchlist_detail_payload(
         "discussionRows": _json_ready(discussion_rows),
         "watchPlan": _json_ready(watch_plan),
         "actionMemo": _json_ready(action_memo),
+        "latestAiShortlist": load_overlay_inference_shortlist(),
     }
 
 
@@ -936,25 +956,18 @@ def get_watchlist_payload(
 
 def _build_ai_panel_payload(
     *,
+    scope: str,
     candidates: pd.DataFrame,
     packet: dict[str, Any],
     brief: str,
     selected_symbol: str | None,
 ) -> dict[str, Any]:
-    llm_bridge = packet.get("llm_bridge", {}) if packet else {}
-    response_lookup = {}
-    response_summary = ""
-    if llm_bridge and llm_bridge.get("response_jsonl_path"):
-        response_lookup = {
-            str(record.get("custom_id", "")).strip(): record
-            for record in read_jsonl_records(Path(str(llm_bridge.get("response_jsonl_path"))))
-        }
-    if llm_bridge and llm_bridge.get("response_summary_path"):
-        summary_path = Path(str(llm_bridge.get("response_summary_path")))
-        if summary_path.exists():
-            response_summary = read_text(summary_path)
-    symbol = selected_symbol or (str(candidates.iloc[0]["ts_code"]) if not candidates.empty else "")
-    selected = candidates.loc[candidates["ts_code"].astype(str) == symbol].head(1)
+    llm_bundle = load_overlay_llm_bundle(scope)
+    response_lookup = dict(llm_bundle.get("response_lookup", {}) or {})
+    response_summary = str(llm_bundle.get("response_summary", "") or "")
+    has_symbol_column = "ts_code" in candidates.columns
+    symbol = selected_symbol or (str(candidates.iloc[0]["ts_code"]) if has_symbol_column and not candidates.empty else "")
+    selected = candidates.loc[candidates["ts_code"].astype(str) == symbol].head(1) if has_symbol_column and symbol else pd.DataFrame()
     selected_record = selected.iloc[0].to_dict() if not selected.empty else {}
     llm_response = response_lookup.get(symbol, {})
     return {
@@ -973,8 +986,9 @@ def _build_ai_panel_summary_payload(
     candidates: pd.DataFrame,
     selected_symbol: str | None,
 ) -> dict[str, Any]:
-    symbol = selected_symbol or (str(candidates.iloc[0]["ts_code"]) if not candidates.empty else "")
-    selected = candidates.loc[candidates["ts_code"].astype(str) == symbol].head(1)
+    has_symbol_column = "ts_code" in candidates.columns
+    symbol = selected_symbol or (str(candidates.iloc[0]["ts_code"]) if has_symbol_column and not candidates.empty else "")
+    selected = candidates.loc[candidates["ts_code"].astype(str) == symbol].head(1) if has_symbol_column and symbol else pd.DataFrame()
     selected_record = selected.iloc[0].to_dict() if not selected.empty else {}
     return {
         "selectedSymbol": symbol,
@@ -986,12 +1000,14 @@ def _build_ai_panel_summary_payload(
 
 def _build_ai_panel_detail_payload(
     *,
+    scope: str,
     candidates: pd.DataFrame,
     packet: dict[str, Any],
     brief: str,
     selected_symbol: str | None,
 ) -> dict[str, Any]:
     full_payload = _build_ai_panel_payload(
+        scope=scope,
         candidates=candidates,
         packet=packet,
         brief=brief,
@@ -1036,6 +1052,7 @@ def get_ai_review_detail_payload(
 ) -> dict[str, Any]:
     if scope == "inference":
         return _build_ai_panel_detail_payload(
+            scope="inference",
             candidates=load_overlay_inference_candidates(),
             packet=load_overlay_inference_packet(),
             brief=load_overlay_inference_brief(),
@@ -1043,6 +1060,7 @@ def get_ai_review_detail_payload(
         )
 
     return _build_ai_panel_detail_payload(
+        scope="historical",
         candidates=load_overlay_candidates(),
         packet=load_overlay_packet(),
         brief=load_overlay_brief(),
@@ -1057,12 +1075,14 @@ def get_ai_review_payload(
 ) -> dict[str, Any]:
     return {
         "inference": _build_ai_panel_payload(
+            scope="inference",
             candidates=load_overlay_inference_candidates(),
             packet=load_overlay_inference_packet(),
             brief=load_overlay_inference_brief(),
             selected_symbol=inference_symbol,
         ),
         "historical": _build_ai_panel_payload(
+            scope="historical",
             candidates=load_overlay_candidates(),
             packet=load_overlay_packet(),
             brief=load_overlay_brief(),
@@ -1145,6 +1165,16 @@ def get_service_payload() -> dict[str, Any]:
     return payload
 
 
+def refresh_realtime_payload() -> dict[str, Any]:
+    realtime_quotes, realtime_status, symbols, _ = _refresh_watchlist_realtime_snapshot()
+    return {
+        "ok": bool(realtime_status.get("available")) or not symbols,
+        "symbolCount": int(len(symbols)),
+        "realtimeRecordCount": int(len(realtime_quotes)),
+        "realtimeStatus": _json_ready(realtime_status),
+    }
+
+
 def get_experiment_config_payload() -> dict[str, Any]:
     return _json_ready(load_experiment_config())
 
@@ -1158,6 +1188,78 @@ def update_experiment_config_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def clear_cache_payload() -> dict[str, Any]:
     clear_dashboard_caches()
     return {"ok": True}
+
+
+def get_data_management_payload(*, include_sensitive: bool = True) -> dict[str, Any]:
+    return _json_ready(
+        build_data_management_payload(
+            root=ROOT,
+            target_source=active_data_source(),
+            include_sensitive=include_sensitive,
+        )
+    )
+
+
+def _validate_tushare_target_source(target_source: str) -> str:
+    normalized = str(target_source or "akshare").strip().lower() or "akshare"
+    if normalized not in {"akshare", "tushare"}:
+        raise ValueError("Tushare refresh currently only supports the akshare/tushare local panel.")
+    return normalized
+
+
+def _format_refresh_output(title: str, lines: list[str]) -> str:
+    rendered_lines = [title, *[line for line in lines if line]]
+    return "\n".join(rendered_lines).strip()
+
+
+def run_tushare_incremental_refresh_payload(*, target_source: str | None = None, end_date: str | None = None) -> dict[str, Any]:
+    resolved_target_source = _validate_tushare_target_source(target_source or active_data_source())
+    summary = run_tushare_incremental_refresh(root=ROOT, target_source=resolved_target_source, end_date=end_date)
+    clear_dashboard_caches()
+    output = _format_refresh_output(
+        "Tushare 增量日线刷新完成",
+        [
+            f"目标数据源：{summary.get('target_source', resolved_target_source)}",
+            f"上一最新日期：{summary.get('previous_latest_trade_date', '-')}",
+            f"当前最新日期：{summary.get('latest_trade_date', '-')}",
+            f"追加交易日：{summary.get('appended_trade_dates', 0)}",
+            f"追加行数：{summary.get('appended_rows', 0)}",
+            f"股票数量：{summary.get('symbols', 0)}",
+        ],
+    )
+    return {
+        "actionName": "tushare_incremental_refresh",
+        "label": "Tushare 增量刷新日线",
+        "ok": True,
+        "output": output,
+    }
+
+
+def run_tushare_full_refresh_payload(*, target_source: str | None = None, end_date: str | None = None) -> dict[str, Any]:
+    resolved_target_source = _validate_tushare_target_source(target_source or active_data_source())
+    summary = run_tushare_full_refresh(root=ROOT, target_source=resolved_target_source, end_date=end_date)
+    clear_dashboard_caches()
+    incremental = summary.get("incremental", {}) if isinstance(summary.get("incremental"), dict) else {}
+    feature_summary = summary.get("features", {}) if isinstance(summary.get("features"), dict) else {}
+    dashboard_sync_summary = summary.get("dashboardSync", {}) if isinstance(summary.get("dashboardSync"), dict) else {}
+    output = _format_refresh_output(
+        "Tushare 全流程刷新完成",
+        [
+            f"目标数据源：{summary.get('target_source', resolved_target_source)}",
+            f"日线最新日期：{incremental.get('latest_trade_date', '-')}",
+            f"追加交易日：{incremental.get('appended_trade_dates', 0)}",
+            f"追加行数：{incremental.get('appended_rows', 0)}",
+            f"特征行数：{feature_summary.get('feature_rows', 0)}",
+            f"标签行数：{feature_summary.get('label_rows', 0)}",
+            f"快照同步：{dashboard_sync_summary.get('message', '-')}",
+        ],
+    )
+    return {
+        "actionName": "tushare_full_refresh",
+        "label": "Tushare 全流程刷新",
+        "ok": bool(summary.get("ok", False)),
+        "output": output,
+    }
 
 
 def run_named_action(action_name: str) -> dict[str, Any]:

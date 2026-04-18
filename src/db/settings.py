@@ -21,11 +21,19 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_password(name: str, default: str = "") -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value)
+
+
 @dataclass(frozen=True)
 class DatabaseSettings:
     host: str
     port: int
     name: str
+    schema: str
     user: str
     password: str
     connect_timeout: int
@@ -35,10 +43,11 @@ class DatabaseSettings:
 def get_database_settings() -> DatabaseSettings:
     load_dotenv(project_root() / ".env")
     return DatabaseSettings(
-        host=_env_text("APP_DB_HOST", "127.0.0.1"),
+        host=_env_text("APP_DB_HOST", "localhost"),
         port=_env_int("APP_DB_PORT", 5432),
-        name=_env_text("APP_DB_NAME", "quant_db"),
-        user=_env_text("APP_DB_USER", "postgres"),
-        password=_env_text("APP_DB_PASSWORD", "postgres123"),
+        name=_env_text("APP_DB_NAME", "replace_with_database_name"),
+        schema=_env_text("APP_DB_SCHEMA", "replace_with_database_schema"),
+        user=_env_text("APP_DB_USER", "replace_with_database_user"),
+        password=_env_password("APP_DB_PASSWORD", ""),
         connect_timeout=_env_int("APP_DB_CONNECT_TIMEOUT", 5),
     )

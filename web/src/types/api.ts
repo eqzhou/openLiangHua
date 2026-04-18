@@ -48,6 +48,7 @@ export interface HomePayload {
     inferenceRecords: JsonRecord[]
     historicalRecords: JsonRecord[]
     focusRecord: JsonRecord
+    shortlistMarkdown?: string
   }
   alerts: Array<{
     tone: string
@@ -74,6 +75,38 @@ export interface AuthUserPayload {
 export interface AuthSessionPayload {
   authenticated: boolean
   user: AuthUserPayload | null
+}
+
+export interface RealtimeRefreshPayload {
+  ok: boolean
+  symbolCount: number
+  realtimeRecordCount: number
+  realtimeStatus: JsonRecord
+}
+
+export interface DataArtifactStatus {
+  exists: boolean
+  rowCount: number
+  symbolCount: number
+  latestTradeDate?: string | null
+  updatedAt?: string | null
+}
+
+export interface DataManagementPayload {
+  targetSource: string
+  activeDataSource: string
+  today: string
+  envPath?: string | null
+  envFileExists: boolean
+  tokenConfigured?: boolean | null
+  dailyBar: DataArtifactStatus
+  featurePanel: DataArtifactStatus
+  labelPanel: DataArtifactStatus
+  datasetSummary: JsonRecord
+  scripts: {
+    incremental: string
+    fullRefresh: string
+  }
 }
 
 export interface OverviewPayload {
@@ -194,6 +227,7 @@ export interface WatchlistDetailPayload {
   discussionRows: JsonRecord[]
   watchPlan: JsonRecord
   actionMemo: JsonRecord
+  latestAiShortlist?: string
 }
 
 export interface AiPanelPayload {

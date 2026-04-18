@@ -12,6 +12,7 @@ from src.app.facades.dashboard_facade import (
     SPLITS,
     get_ai_review_detail_payload,
     clear_cache_payload,
+    get_data_management_payload,
     get_candidate_history_payload,
     generate_action_memo,
     generate_watch_plan,
@@ -32,6 +33,9 @@ from src.app.facades.dashboard_facade import (
     get_watchlist_detail_payload,
     get_watchlist_payload,
     get_watchlist_summary_payload,
+    refresh_realtime_payload,
+    run_tushare_full_refresh_payload,
+    run_tushare_incremental_refresh_payload,
     run_named_action,
     update_experiment_config_payload,
 )
@@ -50,6 +54,11 @@ from src.web_api.settings import ApiSettings, get_api_settings
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=1, max_length=200)
+
+
+class DataRefreshRequest(BaseModel):
+    target_source: str = Field(default="akshare", min_length=1, max_length=50)
+    end_date: str | None = Field(default=None, max_length=20)
 
 
 def _build_auth_payload(user: AuthenticatedUser | None) -> dict[str, Any]:
@@ -145,17 +154,6 @@ def update_experiment_config(
     return update_experiment_config_payload(current)
 
 
-@app.post("/api/actions/{action_name}")
-def post_action(
-    action_name: str,
-    _: AuthenticatedUser = Depends(require_authenticated_user),
-) -> dict[str, Any]:
-    try:
-        return run_named_action(action_name)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"Unknown action: {action_name}") from exc
-
-
 @app.post("/api/actions/watch-plan")
 def post_watch_plan(
     _: AuthenticatedUser = Depends(require_authenticated_user),
@@ -170,11 +168,58 @@ def post_action_memo(
     return generate_action_memo()
 
 
+@app.post("/api/actions/{action_name}")
+def post_action(
+    action_name: str,
+    _: AuthenticatedUser = Depends(require_authenticated_user),
+) -> dict[str, Any]:
+    try:
+        return run_named_action(action_name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown action: {action_name}") from exc
+
+
 @app.post("/api/cache/clear")
 def clear_cache(
     _: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
     return clear_cache_payload()
+
+
+@app.post("/api/realtime/refresh")
+def refresh_realtime(
+    _: AuthenticatedUser = Depends(require_authenticated_user),
+) -> dict[str, Any]:
+    return refresh_realtime_payload()
+
+
+@app.get("/api/data-management")
+def get_data_management(
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
+) -> dict[str, Any]:
+    return get_data_management_payload(include_sensitive=user is not None)
+
+
+@app.post("/api/data-management/tushare-refresh")
+def post_tushare_refresh(
+    payload: DataRefreshRequest,
+    _: AuthenticatedUser = Depends(require_authenticated_user),
+) -> dict[str, Any]:
+    try:
+        return run_tushare_incremental_refresh_payload(target_source=payload.target_source, end_date=payload.end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/data-management/full-refresh")
+def post_tushare_full_refresh(
+    payload: DataRefreshRequest,
+    _: AuthenticatedUser = Depends(require_authenticated_user),
+) -> dict[str, Any]:
+    try:
+        return run_tushare_full_refresh_payload(target_source=payload.target_source, end_date=payload.end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/overview")
@@ -288,7 +333,10 @@ def get_watchlist(
     sort_by: str = Query("inference_rank"),
     symbol: str | None = Query(None),
     include_realtime: bool = Query(False),
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
 ) -> dict[str, Any]:
+    if include_realtime and user is None:
+        raise HTTPException(status_code=401, detail="Please log in before refreshing realtime data.")
     return get_watchlist_payload(
         keyword=keyword,
         scope=scope,
@@ -305,7 +353,10 @@ def get_watchlist_summary(
     sort_by: str = Query("inference_rank"),
     symbol: str | None = Query(None),
     include_realtime: bool = Query(False),
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
 ) -> dict[str, Any]:
+    if include_realtime and user is None:
+        raise HTTPException(status_code=401, detail="Please log in before refreshing realtime data.")
     return get_watchlist_summary_payload(
         keyword=keyword,
         scope=scope,
@@ -322,7 +373,10 @@ def get_watchlist_detail(
     scope: str = Query("all"),
     sort_by: str = Query("inference_rank"),
     include_realtime: bool = Query(False),
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
 ) -> dict[str, Any]:
+    if include_realtime and user is None:
+        raise HTTPException(status_code=401, detail="Please log in before refreshing realtime data.")
     return get_watchlist_detail_payload(
         symbol=symbol,
         keyword=keyword,
