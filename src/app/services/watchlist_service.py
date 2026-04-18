@@ -17,6 +17,35 @@ def _overlay_symbol_set(frame: pd.DataFrame) -> set[str]:
     return set(frame["ts_code"].astype(str).tolist())
 
 
+def _source_metadata(
+    *,
+    entry_group: str,
+    is_overlay_selected: bool,
+    is_inference_overlay_selected: bool,
+) -> tuple[str, str, str]:
+    if entry_group == "持仓":
+        source_category = "手动持有"
+        source_tags = ["手动持有"]
+        source_note = "来自手动持仓配置。"
+    else:
+        source_category = "手动关注"
+        source_tags = ["手动关注"]
+        source_note = "来自手动关注配置。"
+
+    auto_tags: list[str] = []
+    if is_overlay_selected:
+        source_tags.append("历史AI精选")
+        auto_tags.append("历史AI精选")
+    if is_inference_overlay_selected:
+        source_tags.append("最新推理入池")
+        auto_tags.append("最新推理入池")
+
+    if auto_tags:
+        source_note = f"{source_note.rstrip('。')}；同时命中{'、'.join(auto_tags)}。"
+
+    return source_category, " / ".join(source_tags), source_note
+
+
 def build_watchlist_view(
     *,
     root: Path,
@@ -92,9 +121,19 @@ def build_watchlist_view(
             )
 
             row = dict(snapshot)
+            is_overlay_selected = symbol in overlay_symbols
+            is_inference_overlay_selected = symbol in inference_overlay_symbols
+            source_category, source_tags, source_note = _source_metadata(
+                entry_group=entry_group,
+                is_overlay_selected=is_overlay_selected,
+                is_inference_overlay_selected=is_inference_overlay_selected,
+            )
             row.update(
                 {
                     "entry_group": entry_group,
+                    "source_category": source_category,
+                    "source_tags": source_tags,
+                    "source_note": source_note,
                     "focus_note": str(normalized_item.get("note", "") or ""),
                     "is_watch_only": entry_group != "持仓",
                     "premarket_plan": premarket_plan_payload.get("premarket_plan", ""),
@@ -118,7 +157,7 @@ def build_watchlist_view(
                     "inference_ensemble_rank": inference_ensemble_info.get("rank"),
                     "inference_ensemble_rank_pct": inference_ensemble_info.get("rank_pct"),
                     "inference_score": inference_ensemble_info.get("score"),
-                    "is_inference_overlay_selected": symbol in inference_overlay_symbols,
+                    "is_inference_overlay_selected": is_inference_overlay_selected,
                     "ranking_note": " | ".join(ranking_note_parts),
                     "llm_round_count": discussion_snapshot.get("round_count", 0),
                     "llm_selected_round_count": discussion_snapshot.get("selected_round_count", 0),
@@ -130,6 +169,7 @@ def build_watchlist_view(
                     "llm_discussion_snapshot": discussion_snapshot,
                 }
             )
+            row["is_overlay_selected"] = is_overlay_selected
             rows.append(row)
 
     if not rows:

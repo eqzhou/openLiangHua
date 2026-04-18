@@ -7,8 +7,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from src.utils.data_source import source_prefixed_path
-from src.utils.io import project_root, save_text
+from src.app.repositories.report_repository import save_llm_bridge_outputs as repo_save_llm_bridge_outputs
+from src.utils.io import project_root
 from src.utils.logger import configure_logging
 
 logger = configure_logging()
@@ -21,6 +21,11 @@ DEFAULT_PROVIDER = "prompt_only"
 DEFAULT_REASONING_EFFORT = "medium"
 DEFAULT_REASONING_SUMMARY = "auto"
 SUPPORTED_PROVIDERS = {"prompt_only", "openai"}
+PROVIDER_ALIASES = {
+    "cliproxyapi": "openai",
+}
+DEFAULT_OPENAI_API_STYLE = "responses"
+COMPATIBLE_PROXY_API_STYLE = "chat_completions"
 
 
 def _parse_bool(value: str | None, default: bool = False) -> bool:
@@ -41,6 +46,7 @@ def _parse_positive_int(value: str | None) -> int | None:
 
 def _clean_provider(value: str | None) -> str:
     provider = (value or DEFAULT_PROVIDER).strip().lower()
+    provider = PROVIDER_ALIASES.get(provider, provider)
     return provider if provider in SUPPORTED_PROVIDERS else DEFAULT_PROVIDER
 
 
@@ -77,6 +83,7 @@ def load_llm_settings() -> dict[str, Any]:
     max_output_tokens = _parse_positive_int(os.getenv("OVERLAY_LLM_MAX_OUTPUT_TOKENS"))
     api_key = (os.getenv("OPENAI_API_KEY", "") or "").strip()
     base_url = (os.getenv("OPENAI_BASE_URL", "") or "").strip()
+    api_style = COMPATIBLE_PROXY_API_STYLE if base_url else DEFAULT_OPENAI_API_STYLE
 
     auto_execute = enabled and provider == "openai"
     ready = auto_execute and bool(model) and bool(api_key)
@@ -89,6 +96,7 @@ def load_llm_settings() -> dict[str, Any]:
         "max_output_tokens": max_output_tokens,
         "api_key": api_key,
         "base_url": base_url,
+        "api_style": api_style,
         "auto_execute": auto_execute,
         "ready": ready,
     }
@@ -171,16 +179,55 @@ def _openai_payload(request: dict[str, Any], settings: dict[str, Any]) -> dict[s
     return payload
 
 
-def _success_record(request: dict[str, Any], response: Any, payload: dict[str, Any]) -> dict[str, Any]:
+def _openai_chat_completions_payload(request: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": settings.get("model", ""),
+        "messages": request.get("messages", []),
+    }
+    if settings.get("max_output_tokens"):
+        payload["max_tokens"] = int(settings["max_output_tokens"])
+    return payload
+
+
+def _extract_chat_completion_text(response: Any) -> str:
+    choices = getattr(response, "choices", None) or []
+    if not choices:
+        return ""
+    first_choice = choices[0]
+    message = getattr(first_choice, "message", None)
+    content = getattr(message, "content", None) if message is not None else None
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+            else:
+                text = getattr(item, "text", None)
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _success_record(request: dict[str, Any], response: Any, payload: dict[str, Any], *, api_style: str) -> dict[str, Any]:
     usage = _serializable_object(getattr(response, "usage", None))
+    if api_style == COMPATIBLE_PROXY_API_STYLE:
+        output_text = _extract_chat_completion_text(response)
+    else:
+        output_text = str(getattr(response, "output_text", "") or "").strip()
     record = {
         "custom_id": request.get("custom_id", ""),
         "status": "success",
         "provider": "openai",
         "model": getattr(response, "model", None) or payload.get("model"),
+        "api_style": api_style,
         "request_payload": payload,
         "response_id": getattr(response, "id", None),
-        "output_text": str(getattr(response, "output_text", "") or "").strip(),
+        "output_text": output_text,
         "usage": usage,
     }
     return record
@@ -192,6 +239,7 @@ def _error_record(request: dict[str, Any], settings: dict[str, Any], payload: di
         "status": "error",
         "provider": settings.get("provider", DEFAULT_PROVIDER),
         "model": settings.get("model", ""),
+        "api_style": settings.get("api_style", DEFAULT_OPENAI_API_STYLE),
         "request_payload": payload,
         "response_id": None,
         "output_text": "",
@@ -203,23 +251,23 @@ def _error_record(request: dict[str, Any], settings: dict[str, Any], payload: di
 def _execute_openai_requests(requests: list[dict[str, Any]], settings: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
     client = _build_openai_client(settings)
     records: list[dict[str, Any]] = []
+    api_style = str(settings.get("api_style", DEFAULT_OPENAI_API_STYLE) or DEFAULT_OPENAI_API_STYLE)
     for request in requests:
-        payload = _openai_payload(request, settings)
+        if api_style == COMPATIBLE_PROXY_API_STYLE:
+            payload = _openai_chat_completions_payload(request, settings)
+        else:
+            payload = _openai_payload(request, settings)
         try:
-            response = client.responses.create(**payload)
-            records.append(_success_record(request, response, payload))
+            if api_style == COMPATIBLE_PROXY_API_STYLE:
+                response = client.chat.completions.create(**payload)
+            else:
+                response = client.responses.create(**payload)
+            records.append(_success_record(request, response, payload, api_style=api_style))
         except Exception as exc:  # pragma: no cover - network/provider failures are environment-specific
             logger.exception("OpenAI overlay request failed for {}", request.get("custom_id"))
             records.append(_error_record(request, settings, payload, exc))
     status = "executed_with_errors" if any(record["status"] == "error" for record in records) else "executed"
     return records, status
-
-
-def _write_text_variants(text: str, reports_dir: Path, filename: str, data_source: str) -> Path:
-    source_path = source_prefixed_path(reports_dir, filename, data_source)
-    save_text(text, source_path)
-    save_text(text, reports_dir / filename)
-    return source_path
 
 
 def _build_request_summary(
@@ -234,6 +282,7 @@ def _build_request_summary(
         "",
         f"- Provider: {settings.get('provider', DEFAULT_PROVIDER)}",
         f"- Model: {settings.get('model', '') or 'not_configured'}",
+        f"- API Style: {settings.get('api_style', DEFAULT_OPENAI_API_STYLE)}",
         f"- Auto Execute Enabled: {'true' if settings.get('enabled') else 'false'}",
         f"- Ready To Execute: {'true' if settings.get('ready') else 'false'}",
         f"- Execution Status: {execution_status}",
@@ -264,6 +313,7 @@ def _build_response_summary(
         "",
         f"- Provider: {settings.get('provider', DEFAULT_PROVIDER)}",
         f"- Model: {settings.get('model', '') or 'not_configured'}",
+        f"- API Style: {settings.get('api_style', DEFAULT_OPENAI_API_STYLE)}",
         f"- Execution Status: {execution_status}",
         f"- Response Count: {len(response_records)}",
         f"- Success Count: {len(success_records)}",
@@ -339,25 +389,25 @@ def export_llm_requests(
         blocking_reason=blocking_reason,
     )
 
-    request_jsonl_filename = f"{output_prefix}_requests.jsonl"
-    request_summary_filename = f"{output_prefix}_summary.md"
-    request_jsonl_path = _write_text_variants(request_jsonl_text, reports_dir, request_jsonl_filename, data_source)
-    request_summary_path = _write_text_variants(request_summary_text, reports_dir, request_summary_filename, data_source)
-
-    response_jsonl_path = None
+    response_jsonl_text = ""
     if response_records:
-        response_jsonl_filename = f"{output_prefix}_responses.jsonl"
         response_jsonl_text = "\n".join(json.dumps(item, ensure_ascii=False) for item in response_records)
-        response_jsonl_path = _write_text_variants(response_jsonl_text, reports_dir, response_jsonl_filename, data_source)
 
-    response_summary_filename = f"{output_prefix}_response_summary.md"
     response_summary_text = _build_response_summary(
         settings=settings,
         response_records=response_records,
         execution_status=execution_status,
         blocking_reason=blocking_reason,
     )
-    response_summary_path = _write_text_variants(response_summary_text, reports_dir, response_summary_filename, data_source)
+    output_paths = repo_save_llm_bridge_outputs(
+        reports_dir,
+        data_source=data_source,
+        output_prefix=output_prefix,
+        request_jsonl_text=request_jsonl_text,
+        request_summary_text=request_summary_text,
+        response_jsonl_text=response_jsonl_text,
+        response_summary_text=response_summary_text,
+    )
 
     success_count = sum(1 for record in response_records if record.get("status") == "success")
     error_count = sum(1 for record in response_records if record.get("status") == "error")
@@ -367,6 +417,7 @@ def export_llm_requests(
         "auto_execute": bool(settings.get("auto_execute")),
         "provider": settings.get("provider", DEFAULT_PROVIDER),
         "model": settings.get("model", ""),
+        "api_style": settings.get("api_style", DEFAULT_OPENAI_API_STYLE),
         "reasoning_effort": settings.get("reasoning_effort", DEFAULT_REASONING_EFFORT),
         "reasoning_summary": settings.get("reasoning_summary", DEFAULT_REASONING_SUMMARY),
         "max_output_tokens": settings.get("max_output_tokens"),
@@ -376,8 +427,8 @@ def export_llm_requests(
         "response_count": len(response_records),
         "success_count": success_count,
         "error_count": error_count,
-        "jsonl_path": str(request_jsonl_path),
-        "summary_path": str(request_summary_path),
-        "response_jsonl_path": str(response_jsonl_path) if response_jsonl_path else "",
-        "response_summary_path": str(response_summary_path),
+        "jsonl_path": output_paths["jsonl_path"],
+        "summary_path": output_paths["summary_path"],
+        "response_jsonl_path": output_paths["response_jsonl_path"],
+        "response_summary_path": output_paths["response_summary_path"],
     }

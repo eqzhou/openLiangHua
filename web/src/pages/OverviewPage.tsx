@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '../api/client'
+import { Badge } from '../components/Badge'
 import { ComparisonBoard } from '../components/ComparisonBoard'
 import { ContextStrip } from '../components/ContextStrip'
 import { ControlField } from '../components/ControlField'
@@ -9,6 +10,7 @@ import { ControlGrid } from '../components/ControlGrid'
 import { DataTable } from '../components/DataTable'
 import { EntityCell } from '../components/EntityCell'
 import { LineChartCard } from '../components/LineChartCard'
+import { MetricCard } from '../components/MetricCard'
 import { PageFilterBar } from '../components/PageFilterBar'
 import { Panel } from '../components/Panel'
 import { PropertyGrid } from '../components/PropertyGrid'
@@ -17,6 +19,7 @@ import { SectionBlock } from '../components/SectionBlock'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { SpotlightCard } from '../components/SpotlightCard'
 import { SupportPanel } from '../components/SupportPanel'
+import { WorkspaceHero } from '../components/WorkspaceHero'
 import { overviewPageClient } from '../facades/dashboardPageClient'
 import { usePageSearchState } from '../facades/usePageSearchState'
 import { formatDateTime, formatPercent, formatValue } from '../lib/format'
@@ -126,19 +129,16 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
             {
               key: 'annualized',
               label: '年化收益',
-              helper: '先看收益上限',
               values: Object.fromEntries(comparisonColumns.map((column, index) => [column.key, formatPercent(comparison[index]?.daily_portfolio_annualized_return)])),
             },
             {
               key: 'sharpe',
               label: '夏普比率',
-              helper: '再看风险收益比',
               values: Object.fromEntries(comparisonColumns.map((column, index) => [column.key, formatValue(comparison[index]?.daily_portfolio_sharpe)])),
             },
             {
               key: 'drawdown',
               label: '最大回撤',
-              helper: '确认稳健度',
               values: Object.fromEntries(comparisonColumns.map((column, index) => [column.key, formatPercent(comparison[index]?.daily_portfolio_max_drawdown)])),
             },
             {
@@ -186,7 +186,7 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
     },
     {
       label: '日线状态',
-      value: dailyBarState?.exists ? '已落库' : '缺失',
+      value: dailyBarState?.exists ? '可用' : '缺失',
       helper: String(summary.date_max ?? '-'),
       tone: dailyBarState?.exists ? ('good' as const) : ('warn' as const),
     },
@@ -197,25 +197,59 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
     },
   ]
 
+  const splitOptions = (bootstrap?.splitNames ?? ['valid', 'test']).map((split) => ({
+    key: split,
+    label: bootstrap?.splitLabels?.[split] ?? split,
+  }))
+
+  const overviewHeroBadges = (
+    <>
+      <Badge tone="brand">{`当前分段 ${(overviewQuery.data?.selectedSplit ?? params.split).toUpperCase()}`}</Badge>
+      <Badge tone={dailyBarState?.exists ? 'good' : 'warn'}>{`日线 ${dailyBarState?.exists ? '可用' : '缺失'}`}</Badge>
+      <Badge tone={featuresState?.exists ? 'good' : 'warn'}>{`特征 ${featuresState?.exists ? '可用' : '缺失'}`}</Badge>
+      <Badge tone={labelsState?.exists ? 'good' : 'warn'}>{`标签 ${labelsState?.exists ? '可用' : '缺失'}`}</Badge>
+    </>
+  )
+
   return (
     <div className="page-stack">
-      <Panel
-        title="平台总览"
-        subtitle={
-          summary.date_max
-            ? `当前研究区间 ${String(summary.date_min)} 至 ${String(summary.date_max)}。先看分段结论，再看比较和曲线。`
-            : '先看分段结论，再看比较和曲线。'
+      <WorkspaceHero
+        title="研究概览"
+        badges={overviewHeroBadges}
+        controls={
+          <SegmentedControl
+            label="切换概览分段"
+            value={params.split}
+            options={splitOptions}
+            onChange={(value) => updateParams({ split: value })}
+          />
         }
-        tone="warm"
-        className="panel--summary-surface"
-      >
+      />
+
+      <div className="metric-grid metric-grid--four">
+        <MetricCard label="特征样本数" value={summary.feature_rows ?? 0} />
+        <MetricCard label="股票覆盖数" value={summary.feature_symbols ?? 0} />
+        <MetricCard
+          label="最佳年化收益"
+          value={formatPercent(bestAnnualized?.daily_portfolio_annualized_return)}
+          helper={bestAnnualized?.model ? String(bestAnnualized.model).toUpperCase() : '-'}
+          tone="good"
+        />
+        <MetricCard
+          label="最佳夏普"
+          value={formatValue(bestSharpe?.daily_portfolio_sharpe)}
+          helper={bestSharpe?.model ? String(bestSharpe.model).toUpperCase() : '-'}
+          tone="good"
+        />
+      </div>
+
+      <Panel title="数据" subtitle={summary.date_max ? `研究区间 ${String(summary.date_min)} 至 ${String(summary.date_max)}` : undefined} tone="warm" className="panel--summary-surface">
         <QueryNotice isLoading={overviewQuery.isLoading} error={overviewQuery.error} />
 
-        <SectionBlock title="当前总览结论" description="只回答是否可看、谁最强、数据是否完整。">
+        <SectionBlock title="当前概览">
           <SpotlightCard
             title={String(overviewQuery.data?.selectedSplit ?? params.split).toUpperCase()}
             meta="当前比较分段"
-            subtitle="先看收益、夏普和回撤，再决定是否下钻。"
             badges={[
               { label: `日线 ${dailyBarState?.exists ? '可用' : '缺失'}`, tone: dailyBarState?.exists ? 'good' : 'warn' },
               { label: `特征 ${featuresState?.exists ? '可用' : '缺失'}`, tone: featuresState?.exists ? 'good' : 'warn' },
@@ -233,10 +267,7 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
 
         <ContextStrip items={overviewContextItems} />
 
-        <PageFilterBar
-          title="切换总览分段"
-          description="这里只控制总览口径。"
-        >
+        <PageFilterBar title="切换概览分段">
           <ControlGrid variant="double">
             <ControlField label="数据集">
               <select value={params.split} onChange={(event) => updateParams({ split: event.target.value })}>
@@ -251,11 +282,11 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
         </PageFilterBar>
       </Panel>
 
-      <Panel title="横向比较速览" subtitle="先横向摊开关键指标。" tone="calm" className="panel--summary-surface">
+      <Panel title="比较" tone="calm" className="panel--summary-surface">
         <ComparisonBoard columns={comparisonColumns} rows={comparisonRows} />
       </Panel>
 
-      <Panel title="模型总表" subtitle="主表只保留影响判断的核心指标。" tone="calm" className="panel--table-surface">
+      <Panel title="模型" tone="calm" className="panel--table-surface">
         <DataTable
           rows={comparison}
           columns={COMPARISON_COLUMNS}
@@ -268,7 +299,7 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
         />
       </Panel>
 
-      <Panel title="净值曲线" subtitle="曲线作为第二层验证。" tone="calm" className="panel--table-surface">
+      <Panel title="曲线" tone="calm" className="panel--table-surface">
         <LineChartCard
           data={equityCurves}
           xKey="trade_date"
@@ -278,7 +309,7 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
           actions={
             curveViewOptions.length > 1 ? (
               <SegmentedControl
-                label="切换净值曲线视图"
+                label="切换净值预设"
                 value={activeCurveView?.key ?? 'all'}
                 options={curveViewOptions.map((option) => ({ key: option.key, label: option.label }))}
                 onChange={setCurveView}
@@ -290,8 +321,8 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
       </Panel>
 
       <div className="split-layout">
-        <SupportPanel title="数据健康" subtitle="需要核对时再看。">
-          <SectionBlock title="面板状态" description="文件体积、更新时间和覆盖区间后置。" tone="muted" collapsible defaultExpanded={false}>
+        <SupportPanel title="数据补充">
+          <SectionBlock title="面板状态" tone="muted" collapsible defaultExpanded={false}>
             <PropertyGrid
               items={[
                 { label: '日线面板体积', value: formatValue(dailyBarState?.size_mb ? `${dailyBarState.size_mb} MB` : '-') },
@@ -307,8 +338,8 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
           </SectionBlock>
         </SupportPanel>
 
-        <SupportPanel title="最佳模型补充" subtitle="补充说明后置。">
-          <SectionBlock title="最优解补充说明" description="避免首屏重复同一组结论。" tone="muted" collapsible defaultExpanded={false}>
+        <SupportPanel title="模型补充">
+          <SectionBlock title="最优解概览" tone="muted" collapsible defaultExpanded={false}>
             <PropertyGrid
               items={[
                 {

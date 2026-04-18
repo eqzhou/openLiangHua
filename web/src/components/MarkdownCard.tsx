@@ -7,7 +7,7 @@ interface MarkdownCardProps {
 
 export function MarkdownCard({ title, content }: MarkdownCardProps) {
   if (!content) {
-    return <div className="empty-state">暂无内容</div>
+    return <div className="empty-state">暂无信息</div>
   }
 
   return (

@@ -15,6 +15,7 @@ def connect_database(*, settings: DatabaseSettings | None = None, use_dict_rows:
         "user": resolved.user,
         "password": resolved.password,
         "connect_timeout": resolved.connect_timeout,
+        "options": f"-c search_path={resolved.schema},public",
     }
     if use_dict_rows:
         kwargs["row_factory"] = dict_row

@@ -13,7 +13,9 @@ import { DetailSummarySection } from '../components/DetailSummarySection'
 import { DrawerQuickActions } from '../components/DrawerQuickActions'
 import { EntityCell } from '../components/EntityCell'
 import { LineChartCard } from '../components/LineChartCard'
+import { MarkdownCard } from '../components/MarkdownCard'
 import { MetricCard } from '../components/MetricCard'
+import { MobileInspectionCard } from '../components/MobileInspectionCard'
 import { PageFilterBar } from '../components/PageFilterBar'
 import { Panel } from '../components/Panel'
 import { PropertyGrid } from '../components/PropertyGrid'
@@ -23,12 +25,13 @@ import { SectionBlock } from '../components/SectionBlock'
 import { SpotlightCard } from '../components/SpotlightCard'
 import { SupportPanel } from '../components/SupportPanel'
 import { useToast } from '../components/ToastProvider'
+import { WorkspaceHero } from '../components/WorkspaceHero'
 import { usePageSearchState } from '../facades/usePageSearchState'
-import { watchlistDetailClient, watchlistPageClient, watchlistSummaryClient } from '../facades/dashboardPageClient'
-import { formatDateTime, formatPercent, formatValue } from '../lib/format'
+import { realtimeRefreshClient, watchlistDetailClient, watchlistPageClient, watchlistSummaryClient } from '../facades/dashboardPageClient'
+import { formatDateTime, formatPercent, formatValue, getFieldLabel } from '../lib/format'
 import { describeRealtimeSource, normalizeRealtimeFailedSymbols } from '../lib/realtime'
 import { buildAiReviewPath, buildCandidatesPath, copyShareablePageLink } from '../lib/shareLinks'
-import type { BootstrapPayload, JsonRecord, WatchlistDetailPayload, WatchlistSummaryPayload } from '../types/api'
+import type { BootstrapPayload, JsonRecord, RealtimeRefreshPayload, WatchlistDetailPayload, WatchlistSummaryPayload } from '../types/api'
 
 interface WatchlistPageProps {
   bootstrap?: BootstrapPayload
@@ -38,7 +41,7 @@ interface WatchlistPageProps {
 type MetricTone = 'default' | 'good' | 'warn'
 
 const WATCHLIST_COLUMNS = [
-  'entry_group',
+  'source_tags',
   'name',
   'industry',
   'mark_price',
@@ -52,7 +55,7 @@ const WATCHLIST_COLUMNS = [
 ]
 
 const WATCHLIST_COLUMN_LABELS = {
-  entry_group: '分组',
+  source_tags: '来源标签',
   name: '股票',
   industry: '行业',
   mark_price: '参考价',
@@ -61,8 +64,8 @@ const WATCHLIST_COLUMN_LABELS = {
   unrealized_pnl_pct: '浮动收益率',
   ensemble_rank: '历史验证排名',
   inference_ensemble_rank: '最新推理排名',
-  premarket_plan: '盘前建议',
-  llm_latest_status: '研讨状态',
+  premarket_plan: '执行建议',
+  llm_latest_status: '分析状态',
 }
 
 const FIELD_COLUMNS = ['field', 'value']
@@ -95,8 +98,8 @@ const DEFAULT_SORT_LABELS: Record<string, string> = {
 }
 
 const WATCHLIST_VIEW_PRESETS = [
-  { key: 'trading', label: '交易视图', columns: ['name', 'realtime_price', 'realtime_pct_chg', 'mark_price', 'premarket_plan', 'llm_latest_status'] },
-  { key: 'ranking', label: '排名视图', columns: ['entry_group', 'name', 'industry', 'ensemble_rank', 'inference_ensemble_rank', 'premarket_plan'] },
+  { key: 'trading', label: '交易', columns: ['name', 'realtime_price', 'realtime_pct_chg', 'mark_price', 'premarket_plan', 'llm_latest_status'] },
+  { key: 'ranking', label: '排名', columns: ['source_tags', 'name', 'industry', 'ensemble_rank', 'inference_ensemble_rank', 'premarket_plan'] },
 ]
 
 function toneFromSignedNumber(value: unknown): MetricTone {
@@ -129,7 +132,7 @@ function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim()
   }
-  return '请稍后重试。'
+  return '操作失败，请稍后再试。'
 }
 
 function formatDetailValue(field: string, value: unknown): string {
@@ -167,7 +170,7 @@ function toFieldRows(record?: JsonRecord | null): JsonRecord[] {
   return Object.entries(record)
     .filter(([field]) => field !== 'llm_discussion_snapshot')
     .map(([field, value]) => ({
-      field,
+      field: getFieldLabel(field),
       value: formatDetailValue(field, value),
     }))
 }
@@ -194,13 +197,16 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
     enabled: Boolean(selectedSymbol),
   })
 
+  const drawerDetailQuery = useQuery({
+    queryKey: watchlistDetailClient.queryKey(params, drawerSymbol ?? ''),
+    queryFn: () => apiGet<WatchlistDetailPayload>(watchlistDetailClient.path(params, drawerSymbol ?? '')),
+    enabled: Boolean(drawerSymbol),
+  })
+
   const refreshRealtimeMutation = useMutation({
-    mutationFn: () => apiGet<WatchlistSummaryPayload>(watchlistSummaryClient.realtimePath(params)),
+    mutationFn: () => apiPost<RealtimeRefreshPayload>(realtimeRefreshClient.path()),
     onSuccess: (payload) => {
-      queryClient.setQueryData(watchlistSummaryClient.queryKey(params), payload)
-      if (payload.selectedSymbol) {
-        queryClient.invalidateQueries({ queryKey: watchlistDetailClient.queryKey(params, String(payload.selectedSymbol)) })
-      }
+      void queryClient.invalidateQueries()
       const realtime = payload.realtimeStatus ?? {}
       const successCount = Number(realtime.success_symbol_count ?? 0)
       const requestedCount = Number(realtime.requested_symbol_count ?? 0)
@@ -222,7 +228,7 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['watchlist-summary'] })
       queryClient.invalidateQueries({ queryKey: ['watchlist-detail'] })
-      pushToast({ tone: 'success', title: '盯盘清单已生成', description: '观察持仓页已经刷新到最新盯盘清单。' })
+      pushToast({ tone: 'success', title: '盯盘清单已生成', description: '持仓页已经刷新到最新盯盘清单。' })
     },
     onError: (error) => {
       pushToast({ tone: 'error', title: '盯盘清单生成失败', description: toErrorMessage(error) })
@@ -249,11 +255,12 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
     if (!drawerSymbol) {
       return null
     }
-    if (detail && String(detail.ts_code ?? '') === drawerSymbol) {
-      return detail
+    const drawerDetail = drawerDetailQuery.data?.detail
+    if (drawerDetail && String(drawerDetail.ts_code ?? '') === drawerSymbol) {
+      return drawerDetail
     }
     return records.find((row) => String(row.ts_code ?? '') === drawerSymbol) ?? null
-  }, [detail, drawerSymbol, records])
+  }, [drawerDetailQuery.data?.detail, drawerSymbol, records])
   const drawerFieldRows = useMemo(() => toFieldRows(drawerRecord), [drawerRecord])
   const realtimeStatus = summaryQuery.data?.realtimeStatus ?? {}
   const requestedCount = Number(realtimeStatus.requested_symbol_count ?? 0)
@@ -278,8 +285,9 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
         <EntityCell
           title={String(row.name ?? '-')}
           subtitle={String(row.ts_code ?? '')}
-          meta={String(row.industry ?? row.entry_group ?? '')}
+          meta={String(row.industry ?? row.source_category ?? row.entry_group ?? '')}
           badges={[
+            row.source_category ? { label: String(row.source_category), tone: 'brand' as const } : null,
             row.is_overlay_selected ? { label: '历史精选', tone: 'good' as const } : null,
             row.is_inference_overlay_selected ? { label: '最新推理', tone: 'brand' as const } : null,
           ].filter(Boolean) as Array<{ label: string; tone?: 'default' | 'brand' | 'good' | 'warn' }>}
@@ -303,23 +311,33 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
       helper: describeRealtimeSource(realtimeStatus.source).label,
     },
     {
-      label: '当前标的',
+      label: '当前股票',
       value: detail ? buildSymbolLabel(detail) : selectedSymbol || '-',
       helper: String(detail?.watch_level ?? detail?.action_brief ?? ''),
     },
     {
       label: '快照覆盖',
-      value: requestedCount > 0 ? `${successCount} / ${requestedCount}` : '未刷新',
+      value: requestedCount > 0 ? `${successCount} / ${requestedCount}` : '待刷新',
       helper: formatDateTime(realtimeStatus.fetched_at),
       tone: failedSymbols.length ? ('warn' as const) : requestedCount > 0 ? ('good' as const) : ('default' as const),
     },
   ]
 
+  const watchlistHeroBadges = (
+    <>
+      <Badge tone="brand">{scopeLabels[params.scope] ?? params.scope}</Badge>
+      <Badge tone="default">{sortLabels[params.sortBy] ?? params.sortBy}</Badge>
+      <Badge tone={failedSymbols.length ? 'warn' : requestedCount > 0 ? 'good' : 'default'}>
+        {requestedCount > 0 ? `覆盖 ${successCount} / ${requestedCount}` : '待刷新'}
+      </Badge>
+      <Badge tone={authenticated ? 'good' : 'default'}>{authenticated ? '可写' : '只读'}</Badge>
+    </>
+  )
+
   const openDrawer = (symbol: string) => {
     if (!symbol) {
       return
     }
-    updateParams({ symbol })
     setDrawerSymbol(symbol)
   }
 
@@ -362,36 +380,41 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
 
   return (
     <div className="page-stack">
-      <Panel
-        title="观察持仓"
-        subtitle={`当前 ${summaryQuery.data?.filteredCount ?? 0} 条记录。默认展示最新快照，手动刷新才拉实时行情。`}
-        tone="warm"
-        className="panel--summary-surface"
-      >
-        <QueryNotice isLoading={summaryQuery.isLoading} error={summaryQuery.error} loadingText="正在加载最新观察池..." />
-        {writeLocked ? <div className="query-notice query-notice--info">当前未登录。可以查看行情和列表，但生成盯盘清单与操作备忘前需要先登录。</div> : null}
+      <WorkspaceHero
+        title="持仓"
+        className="watchlist-anchor-hero"
+        badges={watchlistHeroBadges}
+      />
+
+      <div className="metric-grid metric-grid--five">
+        <MetricCard label="观察池股票数" value={summaryQuery.data?.overview.totalCount ?? 0} />
+        <MetricCard label="历史精选数" value={summaryQuery.data?.overview.overlayCount ?? 0} tone="good" />
+        <MetricCard label="最新推理池" value={summaryQuery.data?.overview.inferenceOverlayCount ?? 0} />
+        <MetricCard label="参考市值" value={summaryQuery.data?.overview.marketValue ?? 0} />
+        <MetricCard
+          label="浮动盈亏"
+          value={summaryQuery.data?.overview.unrealizedPnl ?? 0}
+          tone={toneFromSignedNumber(summaryQuery.data?.overview.unrealizedPnl)}
+        />
+      </div>
+
+      <Panel title="筛选" subtitle={`当前 ${summaryQuery.data?.filteredCount ?? 0} 条记录`} tone="warm" className="panel--summary-surface">
+        <QueryNotice isLoading={summaryQuery.isLoading} error={summaryQuery.error} loadingText="加载中..." />
+        {writeLocked ? <div className="query-notice query-notice--info">当前只读，可查看最近快照和列表；如需刷新行情或生成内容，请先登录。</div> : null}
 
         <RealtimeStatusBanner
+          title="盘中行情刷新状态"
           status={realtimeStatus}
           isRefreshing={refreshRealtimeMutation.isPending}
           error={refreshRealtimeMutation.isError ? refreshRealtimeMutation.error : undefined}
           onRefresh={() => refreshRealtimeMutation.mutate()}
           onRetryFailed={() => refreshRealtimeMutation.mutate()}
+          disabled={writeLocked || refreshRealtimeMutation.isPending}
         />
 
         <ContextStrip items={watchlistContextItems} />
 
-        <SectionBlock title="先看观察池概况" description="先看总量和盈亏，再下钻单票。">
-          <div className="metric-grid">
-            <MetricCard label="观察池股票数" value={summaryQuery.data?.overview.totalCount ?? 0} />
-            <MetricCard label="历史精选数" value={summaryQuery.data?.overview.overlayCount ?? 0} />
-            <MetricCard label="最新推理池" value={summaryQuery.data?.overview.inferenceOverlayCount ?? 0} />
-            <MetricCard label="参考市值" value={summaryQuery.data?.overview.marketValue ?? 0} />
-            <MetricCard label="浮动盈亏" value={summaryQuery.data?.overview.unrealizedPnl ?? 0} tone={toneFromSignedNumber(summaryQuery.data?.overview.unrealizedPnl)} />
-          </div>
-        </SectionBlock>
-
-        <PageFilterBar title="切换观察工作区" description="先筛选列表，再看单票摘要。">
+        <PageFilterBar title="切换股票">
           <ControlGrid variant="quad">
             <ControlField label="快速搜索">
               <input value={params.keyword} onChange={(event) => updateParams({ keyword: event.target.value })} placeholder="输入代码或名称" />
@@ -414,7 +437,7 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
                 ))}
               </select>
             </ControlField>
-            <ControlField label="查看股票">
+            <ControlField label="查看持仓">
               <select value={selectedSymbol ?? ''} onChange={(event) => updateParams({ symbol: event.target.value })}>
                 <option value="">跟随筛选结果</option>
                 {recordOptions.map((item) => (
@@ -428,7 +451,62 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
         </PageFilterBar>
       </Panel>
 
-      <Panel title="观察池主表" subtitle="先筛选总表，细节看右侧和抽屉。" tone="calm" className="panel--table-surface">
+      <Panel title="当前股票" className="panel--summary-surface watchlist-execution-panel">
+        <QueryNotice isLoading={detailQuery.isLoading} error={detailQuery.error} />
+        {detail ? (
+          <SectionBlock
+            title="交易席位"
+            tone="emphasis"
+            actions={
+              <div className="inline-actions inline-actions--compact">
+                <button type="button" className="button" disabled={writeLocked || generateWatchPlanMutation.isPending} onClick={() => generateWatchPlanMutation.mutate()}>
+                  {generateWatchPlanMutation.isPending ? '生成中...' : '生成盯盘清单'}
+                </button>
+                <button type="button" className="button" disabled={writeLocked || generateActionMemoMutation.isPending} onClick={() => generateActionMemoMutation.mutate()}>
+                  {generateActionMemoMutation.isPending ? '生成中...' : '生成操作备忘'}
+                </button>
+              </div>
+            }
+          >
+            <SpotlightCard
+              title={String(detail.name ?? '-')}
+              meta={String(detail.ts_code ?? '')}
+              subtitle={String(detail.llm_latest_summary ?? detail.premarket_plan ?? detail.watch_level ?? detail.action_brief ?? '暂无概览')}
+              badges={[
+                { label: String(detail.entry_group ?? '观察池'), tone: 'brand' },
+                detail.source_category ? { label: String(detail.source_category), tone: 'brand' } : null,
+                detail.is_watch_only ? { label: '仅观察', tone: 'warn' } : null,
+                detail.is_overlay_selected ? { label: '历史精选', tone: 'good' } : null,
+                detail.is_inference_overlay_selected ? { label: '最新推理', tone: 'good' } : null,
+              ].filter(Boolean) as Array<{ label: string; tone?: 'default' | 'brand' | 'good' | 'warn' }>}
+              metrics={[
+                { label: '强弱分界', value: detail.mark_price ?? '-' },
+                { label: '最新价', value: detail.realtime_price ?? detail.mark_price ?? '-', helper: `${selectedRealtimeSource} / ${formatDateTime(selectedRealtimeTime)}` },
+                { label: '盘中涨跌', value: formatPercent(detail.realtime_pct_chg), tone: toneFromSignedNumber(detail.realtime_pct_chg) },
+                { label: '防守位', value: detail.defensive_price ?? '-', tone: 'warn' },
+                { label: '观察位', value: detail.halfway_recovery_price ?? '-' },
+                { label: '最新推理排名', value: buildRankLabel(detail.inference_ensemble_rank, null, detail.inference_ensemble_rank_pct) },
+              ]}
+            />
+            <PropertyGrid
+              items={[
+                { label: '来源分类', value: formatValue(detail.source_category) },
+                { label: '来源标签', value: formatValue(detail.source_tags), span: 'double' },
+                { label: '来源说明', value: formatValue(detail.source_note), span: 'double' },
+                { label: '历史验证排名', value: buildRankLabel(detail.ensemble_rank, detail.universe_size, detail.ensemble_rank_pct) },
+                { label: '解套价', value: formatValue(detail.breakeven_price) },
+                { label: '价格状态', value: formatValue(detail.mark_status) },
+                    { label: '分析状态', value: formatValue(detail.llm_latest_status) },
+                { label: '最新研讨概览', value: formatValue(detail.llm_latest_summary), span: 'double' },
+              ]}
+            />
+          </SectionBlock>
+        ) : (
+          <div className="empty-state">暂无持仓详情</div>
+        )}
+      </Panel>
+
+      <Panel title="列表" subtitle="总表只负责排优先级和切换当前股票，不承载执行细节。" tone="calm" className="panel--table-surface watchlist-priority-panel">
         <DataTable
           rows={records}
           columns={WATCHLIST_COLUMNS}
@@ -437,40 +515,68 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
           viewPresets={WATCHLIST_VIEW_PRESETS}
           defaultPresetKey="trading"
           loading={summaryQuery.isLoading}
-          loadingText="正在加载观察池..."
+          loadingText="加载中..."
           emptyText="暂无观察池数据"
           stickyFirstColumn
           getRowId={(row) => String(row.ts_code ?? '')}
-          selectedRowId={selectedSymbol ?? null}
+          selectedRowId={drawerSymbol ?? selectedSymbol ?? null}
           onRowClick={(row) => openDrawer(String(row.ts_code ?? ''))}
           cellRenderers={watchlistCellRenderers}
         />
       </Panel>
 
-      <div className="split-layout">
-        <Panel title="当前关注标的" subtitle="先看单票摘要和关键价位。" className="panel--summary-surface">
+      <div className="mobile-inspection-stack mobile-only">
+        <MobileInspectionCard
+          title={String(detail?.name ?? '暂无持仓详情')}
+          subtitle={String(detail?.premarket_plan ?? detail?.watch_level ?? detail?.action_brief ?? '先从持仓列表选择一只股票。')}
+          badges={
+            detail ? (
+              <div className="badge-row">
+                <Badge tone="brand">{String(detail.ts_code ?? '')}</Badge>
+                <Badge tone={detail.is_watch_only ? 'warn' : 'good'}>{detail.is_watch_only ? '仅观察' : '持仓中'}</Badge>
+              </div>
+            ) : null
+          }
+          body={
+            detail ? (
+              <PropertyGrid
+                items={[
+                  { label: '最新价', value: formatValue(detail.realtime_price ?? '-') },
+                  { label: '盘中涨跌', value: formatPercent(detail.realtime_pct_chg ?? '-'), tone: toneFromSignedNumber(detail.realtime_pct_chg) },
+                  { label: '强弱分界', value: formatValue(detail.mark_price ?? '-') },
+                  { label: '防守位', value: formatValue(detail.defensive_price ?? '-') },
+                ]}
+              />
+            ) : null
+          }
+          actions={
+            detail ? (
+              <div className="inline-actions inline-actions--compact">
+                <button type="button" className="button button--primary" onClick={() => setDrawerSymbol(String(detail.ts_code ?? ''))}>
+                  查看详情
+                </button>
+                <button type="button" className="button button--ghost" onClick={() => openAiReview(String(detail.ts_code ?? ''))}>
+                  AI 分析
+                </button>
+              </div>
+            ) : null
+          }
+        />
+
+      </div>
+
+      <div className="split-layout desktop-only">
+        <Panel title="详情" className="panel--summary-surface watchlist-review-panel">
           <QueryNotice isLoading={detailQuery.isLoading} error={detailQuery.error} />
           {detail ? (
             <div className="section-stack">
               <SectionBlock
-                title="核心摘要"
-                description="执行建议和关键价位前置。"
-                tone="emphasis"
-                actions={
-                  <div className="inline-actions inline-actions--compact">
-                    <button type="button" className="button" disabled={writeLocked || generateWatchPlanMutation.isPending} onClick={() => generateWatchPlanMutation.mutate()}>
-                      {generateWatchPlanMutation.isPending ? '生成中...' : '生成盯盘清单'}
-                    </button>
-                    <button type="button" className="button" disabled={writeLocked || generateActionMemoMutation.isPending} onClick={() => generateActionMemoMutation.mutate()}>
-                      {generateActionMemoMutation.isPending ? '生成中...' : '生成操作备忘'}
-                    </button>
-                  </div>
-                }
+                title="详情概览"
               >
                 <SpotlightCard
                   title={String(detail.name ?? '-')}
                   meta={String(detail.ts_code ?? '')}
-                  subtitle={String(detail.premarket_plan ?? detail.watch_level ?? detail.action_brief ?? '暂无摘要')}
+                  subtitle={String(detail.llm_latest_summary ?? detail.action_brief ?? detail.watch_level ?? '暂无概览')}
                   badges={[
                     { label: String(detail.entry_group ?? '观察池'), tone: 'brand' },
                     detail.is_watch_only ? { label: '仅观察', tone: 'warn' } : null,
@@ -483,36 +589,38 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
                     { label: '盘中涨跌', value: formatPercent(detail.realtime_pct_chg), tone: toneFromSignedNumber(detail.realtime_pct_chg), helper: formatDateTime(selectedRealtimeTime) },
                     { label: '历史验证排名', value: buildRankLabel(detail.ensemble_rank, detail.universe_size, detail.ensemble_rank_pct) },
                     { label: '最新推理排名', value: buildRankLabel(detail.inference_ensemble_rank, null, detail.inference_ensemble_rank_pct) },
-                    { label: '防守位', value: detail.defensive_price ?? '-', tone: 'warn' },
+                    { label: '解套价', value: detail.breakeven_price ?? '-' },
                   ]}
                 />
               </SectionBlock>
 
-              <SectionBlock title="执行参考" description="补充价格说明和研讨状态。">
+              <SectionBlock title="价格与研究备注" collapsible defaultExpanded={false}>
                 <PropertyGrid
                   items={[
                     { label: '价格状态', value: formatValue(detail.mark_status) },
+                    { label: '来源标签', value: formatValue(detail.source_tags), span: 'double' },
+                    { label: '来源说明', value: formatValue(detail.source_note), span: 'double' },
                     { label: '状态说明', value: formatValue(detail.mark_status_note), span: 'double' },
-                    { label: '动作提示', value: formatValue(detail.action_brief), span: 'double' },
+                    { label: '操作建议', value: formatValue(detail.action_brief), span: 'double' },
                     { label: '解套价', value: formatValue(detail.breakeven_price) },
-                    { label: '关注备注', value: formatValue(detail.focus_note || '暂无') },
+                    { label: '关注备注', value: formatValue(detail.focus_note || '暂无备注') },
                     { label: '排名备注', value: formatValue(detail.ranking_note), span: 'double' },
-                    { label: '最新研讨状态', value: formatValue(detail.llm_latest_status) },
-                    { label: '最新研讨摘要', value: formatValue(detail.llm_latest_summary), span: 'double' },
+                    { label: '分析状态', value: formatValue(detail.llm_latest_status) },
+                    { label: '分析结论', value: formatValue(detail.llm_latest_summary), span: 'double' },
                   ]}
                 />
               </SectionBlock>
             </div>
           ) : (
-            <div className="empty-state">暂无单票详情</div>
+            <div className="empty-state">暂无持仓详情</div>
           )}
         </Panel>
 
-        <SupportPanel title="盘中与研究" subtitle="盘中状态和研究补充后置。">
-          <SectionBlock title="盘中状态" description="确认快照来源和覆盖率。">
+        <SupportPanel title="盘中" className="watchlist-support-panel">
+          <SectionBlock title="盘中状态" collapsible defaultExpanded={false}>
             <div className="metric-grid metric-grid--compact">
               <MetricCard label="实时来源" value={describeRealtimeSource(realtimeStatus.source).label} helper={formatDateTime(realtimeStatus.fetched_at)} />
-              <MetricCard label="刷新覆盖" value={requestedCount > 0 ? `${successCount} / ${requestedCount}` : '未刷新'} tone={requestedCount > 0 && successCount === requestedCount ? 'good' : 'warn'} />
+              <MetricCard label="刷新覆盖" value={requestedCount > 0 ? `${successCount} / ${requestedCount}` : '待刷新'} tone={requestedCount > 0 && successCount === requestedCount ? 'good' : 'warn'} />
               <MetricCard label="盘中涨跌" value={formatPercent(detail?.realtime_pct_chg)} tone={toneFromSignedNumber(detail?.realtime_pct_chg)} />
               <MetricCard label="盘中振幅" value={formatPercent(detail?.realtime_amplitude)} tone={toneFromSignedNumber(detail?.realtime_amplitude)} />
             </div>
@@ -520,12 +628,12 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
               items={[
                 { label: '最近刷新时间', value: formatDateTime(realtimeStatus.fetched_at) },
                 { label: '最近轮次', value: formatValue(detailQuery.data?.detail?.llm_latest_round) },
-                { label: '失败股票', value: failedSymbols.length ? failedSymbols.join(' / ') : '无', span: 'double', tone: failedSymbols.length ? 'warn' : 'good' },
+                { label: '失败股票', value: failedSymbols.length ? failedSymbols.join(' / ') : '暂无', span: 'double', tone: failedSymbols.length ? 'warn' : 'good' },
               ]}
             />
             <div className="inline-actions inline-actions--compact">
               <button type="button" className="button button--ghost" onClick={() => detail?.ts_code && openAiReview(String(detail.ts_code))}>
-                打开 AI 研判页
+                查看 AI 分析
               </button>
             </div>
           </SectionBlock>
@@ -533,7 +641,25 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
       </div>
 
       <div className="split-layout">
-        <SupportPanel title="分批观察计划" subtitle="计划单独后置。">
+        <SupportPanel
+          title="计划"
+          className="watchlist-support-panel"
+          mobileCard={{
+            title: '分批观察计划',
+            subtitle: detail ? String(detail.name ?? detail.ts_code ?? '当前股票') : '先从持仓列表选择一只股票。',
+            actions: (
+              <details className="details-block">
+                <summary>展开计划表</summary>
+                <DataTable
+                  rows={detailQuery.data?.reducePlan ?? []}
+                  columnLabels={REDUCE_PLAN_COLUMN_LABELS}
+                  storageKey="watchlist-reduce-plan-mobile"
+                  emptyText="暂无计划表"
+                />
+              </details>
+            ),
+          }}
+        >
           <DataTable
             rows={detailQuery.data?.reducePlan ?? []}
             columnLabels={REDUCE_PLAN_COLUMN_LABELS}
@@ -542,25 +668,56 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
           />
         </SupportPanel>
 
-        <SupportPanel title="评分历史" subtitle="历史曲线单独后置。">
+        <SupportPanel
+          title="历史"
+          className="watchlist-support-panel"
+          mobileCard={{
+            title: '评分历史',
+            subtitle: detail ? String(detail.name ?? detail.ts_code ?? '当前股票') : '先从持仓列表选择一只股票。',
+            body: (
+              <LineChartCard
+                data={detailQuery.data?.history ?? []}
+                xKey="trade_date"
+                lineKeys={['score']}
+                title="历史评分曲线"
+              />
+            ),
+          }}
+        >
           <LineChartCard
             data={detailQuery.data?.history ?? []}
             xKey="trade_date"
             lineKeys={['score']}
             title="历史评分曲线"
-            subtitle="观察这只股票在历史验证中的评分变化。"
           />
         </SupportPanel>
       </div>
 
+      <SupportPanel title="AI Shortlist">
+        <SectionBlock title="最新推理重点股票" collapsible defaultExpanded={false}>
+          <MarkdownCard title="交易员可读 Shortlist" content={detailQuery.data?.latestAiShortlist} />
+        </SectionBlock>
+      </SupportPanel>
+
       <DetailDrawer
         open={Boolean(drawerRecord)}
         title={drawerRecord ? buildSymbolLabel(drawerRecord) : '持仓详情'}
-        subtitle={drawerRecord ? String(drawerRecord.watch_level ?? drawerRecord.action_brief ?? '查看当前持仓的完整字段。') : undefined}
+        subtitle={drawerRecord ? String(drawerRecord.watch_level ?? drawerRecord.action_brief ?? '') : undefined}
+        className="watchlist-review-drawer"
+        status={
+          drawerRecord ? (
+            <div className="badge-row">
+              <Badge tone="brand">{String(drawerRecord.entry_group ?? '观察池')}</Badge>
+              {drawerRecord.source_category ? <Badge tone="brand">{String(drawerRecord.source_category)}</Badge> : null}
+              {drawerRecord.is_watch_only ? <Badge tone="warn">仅观察</Badge> : <Badge tone="good">持仓中</Badge>}
+            </div>
+          ) : null
+        }
         meta={
           drawerRecord ? (
             <div className="badge-row">
               <Badge tone="brand">{String(drawerRecord.entry_group ?? '观察池')}</Badge>
+              {drawerRecord.source_category ? <Badge tone="brand">{String(drawerRecord.source_category)}</Badge> : null}
               {drawerRecord.is_watch_only ? <Badge tone="warn">仅观察</Badge> : <Badge tone="good">持仓中</Badge>}
             </div>
           ) : null
@@ -569,33 +726,38 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
       >
         {drawerRecord ? (
           <div className="section-stack">
+            <QueryNotice isLoading={drawerDetailQuery.isLoading} error={drawerDetailQuery.error} />
             <DetailSummarySection
+              sectionTitle="详情概览"
               title={String(drawerRecord.name ?? '-')}
               meta={String(drawerRecord.ts_code ?? '')}
-              subtitle={String(drawerRecord.premarket_plan ?? drawerRecord.watch_level ?? drawerRecord.action_brief ?? '查看当前持仓的核心信息。')}
+              subtitle={String(drawerRecord.action_brief ?? drawerRecord.watch_level ?? '查看当前持仓详情。')}
               badges={[
                 { label: String(drawerRecord.entry_group ?? '观察池'), tone: 'brand' },
+                drawerRecord.source_category ? { label: String(drawerRecord.source_category), tone: 'brand' } : null,
                 drawerRecord.is_watch_only ? { label: '仅观察', tone: 'warn' } : { label: '持仓中', tone: 'good' },
-              ]}
+              ].filter(Boolean) as Array<{ label: string; tone?: 'default' | 'brand' | 'good' | 'warn' }>}
               metrics={[
                 { label: '参考价', value: drawerRecord.mark_price ?? '-' },
                 { label: '最新价', value: drawerRecord.realtime_price ?? '-', helper: describeRealtimeSource(drawerRecord.realtime_quote_source).label },
                 { label: '浮动收益率', value: formatPercent(drawerRecord.unrealized_pnl_pct), tone: toneFromSignedNumber(drawerRecord.unrealized_pnl_pct) },
               ]}
               properties={[
-                { label: '盘前建议', value: formatValue(drawerRecord.premarket_plan), span: 'double', tone: 'good' },
+                { label: '概览', value: formatValue(drawerRecord.action_brief), span: 'double', tone: 'good' },
+                { label: '来源标签', value: formatValue(drawerRecord.source_tags), span: 'double' },
+                { label: '来源说明', value: formatValue(drawerRecord.source_note), span: 'double' },
                 { label: '价格状态', value: formatValue(drawerRecord.mark_status) },
                 { label: '解套价', value: formatValue(drawerRecord.breakeven_price) },
-                { label: '实时来源', value: describeRealtimeSource(drawerRecord.realtime_quote_source).label },
+                { label: '行情来源', value: describeRealtimeSource(drawerRecord.realtime_quote_source).label },
                 { label: '实时更新时间', value: formatDateTime(drawerRecord.realtime_time) },
-                { label: '最新研讨状态', value: formatValue(drawerRecord.llm_latest_status) },
-                { label: '最新研讨摘要', value: formatValue(drawerRecord.llm_latest_summary), span: 'double' },
+                { label: '分析状态', value: formatValue(drawerRecord.llm_latest_status) },
+                { label: '分析结论', value: formatValue(drawerRecord.llm_latest_summary), span: 'double' },
               ]}
             />
 
             <DrawerQuickActions
-              title="快捷操作"
-              description="需要时再执行刷新、生成和跳转。"
+              title="详情操作"
+              meta={String(drawerRecord.ts_code ?? '')}
               primaryActions={[
                 {
                   key: 'generate-watch-plan',
@@ -611,10 +773,19 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
                 },
               ]}
               secondaryActions={[
+                {
+                  key: 'set-current-focus',
+                  label: '设为当前股票',
+                  onClick: () => {
+                    updateParams({ symbol: String(drawerRecord.ts_code ?? '') })
+                    setDrawerSymbol(null)
+                  },
+                  tone: 'ghost',
+                },
                 { key: 'copy-symbol', label: '复制股票代码', onClick: () => copySymbol(String(drawerRecord.ts_code ?? '')), tone: 'ghost' },
                 { key: 'copy-view', label: '复制当前视图', onClick: copyCurrentViewLink, tone: 'ghost' },
-                { key: 'open-ai-review', label: '跳到 AI 研判', onClick: () => openAiReview(String(drawerRecord.ts_code ?? '')), tone: 'ghost' },
-                { key: 'open-candidates', label: '跳到候选页', onClick: () => openCandidatesPage(String(drawerRecord.ts_code ?? '')), tone: 'ghost' },
+                { key: 'open-ai-review', label: '查看 AI 分析', onClick: () => openAiReview(String(drawerRecord.ts_code ?? '')), tone: 'ghost' },
+                { key: 'open-candidates', label: '查看候选', onClick: () => openCandidatesPage(String(drawerRecord.ts_code ?? '')), tone: 'ghost' },
               ]}
             />
 

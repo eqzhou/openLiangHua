@@ -20,6 +20,7 @@ const ModelBacktestPage = lazy(() => import('./pages/ModelBacktestPage').then((m
 const CandidatesPage = lazy(() => import('./pages/CandidatesPage').then((module) => ({ default: module.CandidatesPage })))
 const WatchlistPage = lazy(() => import('./pages/WatchlistPage').then((module) => ({ default: module.WatchlistPage })))
 const AiReviewPage = lazy(() => import('./pages/AiReviewPage').then((module) => ({ default: module.AiReviewPage })))
+const DataManagementPage = lazy(() => import('./pages/DataManagementPage').then((module) => ({ default: module.DataManagementPage })))
 const ServicePage = lazy(() => import('./pages/ServicePage').then((module) => ({ default: module.ServicePage })))
 
 function toErrorMessage(error: unknown): string {
@@ -64,7 +65,7 @@ function DashboardApp() {
       pushToast({
         tone: 'success',
         title: '登录成功',
-        description: `${payload.user?.displayName ?? payload.user?.username ?? '当前用户'} 已进入研究工作台。`,
+        description: `${payload.user?.displayName ?? payload.user?.username ?? '当前用户'} 已进入工作台。`,
       })
     },
     onError: (error) => {
@@ -259,7 +260,8 @@ function DashboardApp() {
           <Route path="/candidates" element={<CandidatesPage bootstrap={shellQuery.data?.bootstrap} />} />
           <Route path="/watchlist" element={<WatchlistPage bootstrap={shellQuery.data?.bootstrap} authenticated={isAuthenticated} />} />
           <Route path="/ai-review" element={<AiReviewPage />} />
-          <Route path="/service" element={<ServicePage />} />
+          <Route path="/data" element={<DataManagementPage authenticated={isAuthenticated} />} />
+          <Route path="/service" element={<ServicePage authenticated={isAuthenticated} />} />
         </Routes>
       </Suspense>
     </AppLayout>

@@ -7,6 +7,8 @@ import type { JsonRecord } from '../types/api'
 type BannerTone = 'info' | 'success' | 'warn' | 'error' | 'loading'
 
 interface RealtimeStatusBannerProps {
+  eyebrow?: string
+  title?: string
   status?: JsonRecord
   isRefreshing?: boolean
   error?: unknown
@@ -19,7 +21,7 @@ function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim()
   }
-  return '请稍后重试。'
+  return '操作失败，请稍后再试。'
 }
 
 function bannerToneFromState(
@@ -59,36 +61,38 @@ function bannerMessage(
   servedFrom: string,
 ): string {
   if (isRefreshing) {
-    return '正在抓取当前工作区的最新盘中行情。'
+    return '正在刷新盘中行情。'
   }
   if (error) {
-    return `实时刷新失败：${toErrorMessage(error)}`
+    return `刷新失败：${toErrorMessage(error)}`
   }
   if (requestedCount === 0) {
-    return '页面会优先显示最近一份可复用的行情快照；需要向外部源拉取最新行情时，请点击手动刷新。'
+    return '当前显示最近快照，可手动刷新。'
   }
   if (successCount === 0) {
-    return '本次刷新没有拿到有效实时行情。'
+    return '未获取到实时行情。'
   }
   if (String(servedFrom) === 'database') {
-    return `当前显示的是 ${snapshotLabel}，不再重复请求外部行情接口。`
+    return `当前显示 ${snapshotLabel}。`
   }
   if (String(servedFrom) === 'database-fallback') {
-    return `外部行情暂不可用，当前回退展示的是 ${snapshotLabel}。`
+    return `当前显示回退快照 ${snapshotLabel}。`
   }
   if (snapshotLabel.includes('盘后')) {
-    return `已抓取 ${snapshotLabel}，后续同日请求会直接复用这份结果。`
+    return `已刷新 ${snapshotLabel}。`
   }
   if (hasFallback) {
-    return `主源不可用，当前显示为 ${sourceLabel} 的降级结果。`
+    return `当前显示 ${sourceLabel} 降级结果。`
   }
   if (failedCount > 0) {
-    return `刷新已完成，但还有 ${failedCount} 只股票需要重试。`
+    return `已刷新，仍有 ${failedCount} 只股票失败。`
   }
-  return '实时行情已通过主源刷新完成。'
+  return '实时行情已刷新。'
 }
 
 export function RealtimeStatusBanner({
+  eyebrow,
+  title = '实时行情状态',
   status = {},
   isRefreshing = false,
   error,
@@ -121,13 +125,13 @@ export function RealtimeStatusBanner({
     <section className={`realtime-banner realtime-banner--${tone}`} role="status" aria-live="polite">
       <div className="realtime-banner__header">
         <div className="realtime-banner__copy">
-          <p className="realtime-banner__eyebrow">实时监控</p>
-          <h3 className="realtime-banner__title">实时行情状态</h3>
+          <p className="realtime-banner__eyebrow">{eyebrow}</p>
+          <h3 className="realtime-banner__title">{title}</h3>
           <p className="realtime-banner__message">{message}</p>
         </div>
         <div className="realtime-banner__actions">
           <button type="button" className="button button--primary" onClick={onRefresh} disabled={disabled || isRefreshing}>
-            {isRefreshing ? '刷新中...' : '手动拉取最新行情'}
+            {isRefreshing ? '刷新中...' : '刷新行情'}
           </button>
           {failedSymbols.length ? (
             <button type="button" className="button button--ghost" onClick={onRetryFailed ?? onRefresh} disabled={disabled || isRefreshing}>
@@ -142,7 +146,7 @@ export function RealtimeStatusBanner({
         <Badge tone={fallbackMode ? 'warn' : 'brand'}>{source.label}</Badge>
         <Badge tone={snapshotMode.tone}>{snapshotLabel}</Badge>
         <Badge tone={requestedCount > 0 && successCount === requestedCount ? 'good' : 'default'}>
-          {requestedCount > 0 ? `覆盖 ${successCount} / ${requestedCount}` : '未刷新'}
+          {requestedCount > 0 ? `覆盖 ${successCount} / ${requestedCount}` : '待刷新'}
         </Badge>
         {failedSymbols.length ? <Badge tone="warn">{`失败 ${failedSymbols.length}`}</Badge> : null}
       </div>
@@ -154,9 +158,9 @@ export function RealtimeStatusBanner({
           { label: '来源', value: source.label },
           { label: '数据形态', value: snapshotLabel },
           { label: '更新时间', value: formatDateTime(status.fetched_at) },
-          { label: '覆盖率', value: requestedCount > 0 ? `${successCount} / ${requestedCount}` : '未刷新' },
-          { label: '失败股票', value: failedSymbols.length ? failedSymbols.join(' / ') : '无', span: 'double', tone: failedSymbols.length ? 'warn' : 'good' },
-          { label: '最近错误', value: error ? toErrorMessage(error) : runtimeError || '无', span: 'double', tone: error || runtimeError ? 'warn' : 'default' },
+          { label: '覆盖率', value: requestedCount > 0 ? `${successCount} / ${requestedCount}` : '待刷新' },
+          { label: '失败股票', value: failedSymbols.length ? failedSymbols.join(' / ') : '暂无', span: 'double', tone: failedSymbols.length ? 'warn' : 'good' },
+          { label: '最近错误', value: error ? toErrorMessage(error) : runtimeError || '暂无', span: 'double', tone: error || runtimeError ? 'warn' : 'default' },
         ]}
       />
     </section>

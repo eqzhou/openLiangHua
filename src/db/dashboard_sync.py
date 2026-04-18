@@ -17,6 +17,7 @@ from src.app.repositories.report_repository import (
     load_feature_panel,
     load_latest_symbol_markdown,
     load_metrics,
+    load_inference_packet,
     load_overlay_brief,
     load_overlay_candidates,
     load_overlay_inference_brief,
@@ -26,6 +27,7 @@ from src.app.repositories.report_repository import (
     load_portfolio,
     load_predictions,
     load_stability,
+    load_ensemble_weights,
 )
 from src.app.viewmodels.factor_explorer_vm import build_missing_rate_table, list_numeric_factor_columns
 from src.app.services.watchlist_service import build_watchlist_view
@@ -36,6 +38,8 @@ from src.db.dashboard_artifact_keys import (
     factor_explorer_artifact_key,
     json_artifact_key,
     note_artifact_key,
+    overlay_llm_response_summary_artifact_key,
+    overlay_llm_responses_artifact_key,
     table_artifact_key,
     text_artifact_key,
     watchlist_artifact_key,
@@ -50,15 +54,6 @@ MODEL_NAMES = ("ridge", "lgbm", "ensemble")
 PREDICTION_SPLITS = ("valid", "test", "inference")
 DIAGNOSTIC_TABLES = ("yearly", "regime")
 NOTE_KINDS = ("watch_plan", "action_memo")
-BINARY_ARTIFACT_SPECS = (
-    ("data/staging", "daily_bar.parquet", "daily_bar"),
-    ("data/staging", "trade_calendar.parquet", "trade_calendar"),
-    ("data/staging", "stock_basic.parquet", "stock_basic"),
-    ("data/features", "feature_panel.parquet", "feature_panel"),
-    ("data/labels", "label_panel.parquet", "label_panel"),
-)
-
-
 @dataclass(frozen=True)
 class SyncSummary:
     ok: bool
@@ -99,25 +94,49 @@ def _frame_payload(frame: pd.DataFrame) -> list[dict[str, Any]]:
     return [_json_ready(record) for record in working.to_dict(orient="records")]
 
 
-def _sync_binary_artifacts(*, store, root: Path, data_source: str) -> int:
+def _artifact_exists(store, artifact_key: str) -> bool:
+    try:
+        return store.get_artifact(artifact_key) is not None
+    except Exception:
+        return False
+
+
+def _sync_llm_bridge_artifacts(*, store, data_source: str, scope: str, packet: dict[str, Any]) -> int:
+    llm_bridge = dict(packet.get("llm_bridge", {}) or {})
     synced_items = 0
-    for directory_name, filename, artifact_name in BINARY_ARTIFACT_SPECS:
-        directory = root / directory_name
-        path = source_or_canonical_path(directory, filename, data_source)
-        if not path.exists():
-            continue
-        store.upsert_bytes(
-            artifact_key=binary_artifact_key(data_source, artifact_name),
-            data_source=data_source,
-            artifact_kind="parquet",
-            content=path.read_bytes(),
-            metadata={
-                "artifact_name": artifact_name,
-                "source_path": str(path),
-                "size_bytes": path.stat().st_size,
-            },
-        )
-        synced_items += 1
+
+    response_path_text = str(llm_bridge.get("response_jsonl_path", "") or "").strip()
+    if response_path_text:
+        response_path = Path(response_path_text)
+        if response_path.exists():
+            store.upsert_text(
+                artifact_key=overlay_llm_responses_artifact_key(data_source, scope),
+                data_source=data_source,
+                artifact_kind="jsonl",
+                content=response_path.read_text(encoding="utf-8", errors="ignore"),
+                metadata={
+                    "source_path": str(response_path),
+                    "size_bytes": response_path.stat().st_size,
+                },
+            )
+            synced_items += 1
+
+    summary_path_text = str(llm_bridge.get("response_summary_path", "") or "").strip()
+    if summary_path_text:
+        summary_path = Path(summary_path_text)
+        if summary_path.exists():
+            store.upsert_text(
+                artifact_key=overlay_llm_response_summary_artifact_key(data_source, scope),
+                data_source=data_source,
+                artifact_kind="markdown",
+                content=summary_path.read_text(encoding="utf-8", errors="ignore"),
+                metadata={
+                    "source_path": str(summary_path),
+                    "size_bytes": summary_path.stat().st_size,
+                },
+            )
+            synced_items += 1
+
     return synced_items
 
 
@@ -290,6 +309,35 @@ def sync_factor_explorer_snapshot_artifact(
     )
 
 
+def sync_dataset_summary_artifact(
+    *,
+    root: Path | None = None,
+    data_source: str | None = None,
+    summary_payload: dict[str, Any] | None = None,
+) -> SyncSummary:
+    resolved_root = root or project_root()
+    resolved_data_source = data_source or active_data_source()
+    store = get_dashboard_artifact_store()
+
+    try:
+        payload = summary_payload or load_dataset_summary(
+            resolved_root,
+            data_source=resolved_data_source,
+            prefer_database=False,
+        )
+        store.upsert_json(
+            artifact_key=json_artifact_key(resolved_data_source, "dataset_summary"),
+            data_source=resolved_data_source,
+            artifact_kind="json",
+            payload=_json_ready(payload),
+            metadata={"artifact_name": "dataset_summary"},
+        )
+    except Exception as exc:
+        return SyncSummary(ok=False, synced_items=0, message=str(exc))
+
+    return SyncSummary(ok=True, synced_items=1, message="Synced dataset summary to Postgres.")
+
+
 def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | None = None) -> SyncSummary:
     resolved_root = root or project_root()
     resolved_data_source = data_source or active_data_source()
@@ -317,35 +365,17 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
         )
         synced_items += 1
 
-        dataset_summary = load_dataset_summary(resolved_root, data_source=resolved_data_source, prefer_database=False)
-        store.upsert_json(
-            artifact_key=json_artifact_key(resolved_data_source, "dataset_summary"),
-            data_source=resolved_data_source,
-            artifact_kind="json",
-            payload=_json_ready(dataset_summary),
-            metadata={"artifact_name": "dataset_summary"},
-        )
-        synced_items += 1
-
-        synced_items += _sync_binary_artifacts(
-            store=store,
-            root=resolved_root,
-            data_source=resolved_data_source,
-        )
-
-        factor_snapshot_summary = sync_factor_explorer_snapshot_artifact(
-            root=resolved_root,
-            data_source=resolved_data_source,
-        )
-        if not factor_snapshot_summary.ok:
-            raise RuntimeError(factor_snapshot_summary.message)
-        synced_items += factor_snapshot_summary.synced_items
-
         for model_name in MODEL_NAMES:
-            stability = load_stability(resolved_root, data_source=resolved_data_source, model_name=model_name, prefer_database=False)
+            stability_key = json_artifact_key(resolved_data_source, f"stability:{model_name}")
+            stability = {} if _artifact_exists(store, stability_key) else load_stability(
+                resolved_root,
+                data_source=resolved_data_source,
+                model_name=model_name,
+                prefer_database=False,
+            )
             if stability:
                 store.upsert_json(
-                    artifact_key=json_artifact_key(resolved_data_source, f"stability:{model_name}"),
+                    artifact_key=stability_key,
                     data_source=resolved_data_source,
                     artifact_kind="json",
                     payload=_json_ready(stability),
@@ -353,7 +383,8 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                 )
                 synced_items += 1
 
-            importance = load_feature_importance(
+            importance_key = table_artifact_key(resolved_data_source, f"feature_importance:{model_name}")
+            importance = pd.DataFrame() if _artifact_exists(store, importance_key) else load_feature_importance(
                 resolved_root,
                 data_source=resolved_data_source,
                 model_name=model_name,
@@ -361,7 +392,7 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
             )
             if not importance.empty:
                 store.upsert_json(
-                    artifact_key=table_artifact_key(resolved_data_source, f"feature_importance:{model_name}"),
+                    artifact_key=importance_key,
                     data_source=resolved_data_source,
                     artifact_kind="table",
                     payload=_frame_payload(importance),
@@ -370,7 +401,8 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                 synced_items += 1
 
             for split_name in PREDICTION_SPLITS:
-                predictions = load_predictions(
+                prediction_key = table_artifact_key(resolved_data_source, f"predictions:{model_name}:{split_name}")
+                predictions = pd.DataFrame() if _artifact_exists(store, prediction_key) else load_predictions(
                     resolved_root,
                     data_source=resolved_data_source,
                     model_name=model_name,
@@ -379,7 +411,7 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                 )
                 if not predictions.empty:
                     store.upsert_json(
-                        artifact_key=table_artifact_key(resolved_data_source, f"predictions:{model_name}:{split_name}"),
+                        artifact_key=prediction_key,
                         data_source=resolved_data_source,
                         artifact_kind="table",
                         payload=_frame_payload(predictions),
@@ -398,7 +430,8 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                         raise RuntimeError(candidate_summary.message)
                     synced_items += candidate_summary.synced_items
 
-                portfolio = load_portfolio(
+                portfolio_key = table_artifact_key(resolved_data_source, f"portfolio:{model_name}:{split_name}")
+                portfolio = pd.DataFrame() if _artifact_exists(store, portfolio_key) else load_portfolio(
                     resolved_root,
                     data_source=resolved_data_source,
                     model_name=model_name,
@@ -407,7 +440,7 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                 )
                 if not portfolio.empty:
                     store.upsert_json(
-                        artifact_key=table_artifact_key(resolved_data_source, f"portfolio:{model_name}:{split_name}"),
+                        artifact_key=portfolio_key,
                         data_source=resolved_data_source,
                         artifact_kind="table",
                         payload=_frame_payload(portfolio),
@@ -415,7 +448,8 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                     )
                     synced_items += 1
 
-                metrics = load_metrics(
+                metrics_key = json_artifact_key(resolved_data_source, f"metrics:{model_name}:{split_name}")
+                metrics = {} if _artifact_exists(store, metrics_key) else load_metrics(
                     resolved_root,
                     data_source=resolved_data_source,
                     model_name=model_name,
@@ -424,7 +458,7 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                 )
                 if metrics:
                     store.upsert_json(
-                        artifact_key=json_artifact_key(resolved_data_source, f"metrics:{model_name}:{split_name}"),
+                        artifact_key=metrics_key,
                         data_source=resolved_data_source,
                         artifact_kind="json",
                         payload=_json_ready(metrics),
@@ -433,7 +467,8 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                     synced_items += 1
 
                 for table_name in DIAGNOSTIC_TABLES:
-                    diagnostic = load_diagnostic_table(
+                    diagnostic_key = table_artifact_key(resolved_data_source, f"diagnostic:{model_name}:{split_name}:{table_name}")
+                    diagnostic = pd.DataFrame() if _artifact_exists(store, diagnostic_key) else load_diagnostic_table(
                         resolved_root,
                         data_source=resolved_data_source,
                         model_name=model_name,
@@ -444,7 +479,7 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                     if diagnostic.empty:
                         continue
                     store.upsert_json(
-                        artifact_key=table_artifact_key(resolved_data_source, f"diagnostic:{model_name}:{split_name}:{table_name}"),
+                        artifact_key=diagnostic_key,
                         data_source=resolved_data_source,
                         artifact_kind="table",
                         payload=_frame_payload(diagnostic),
@@ -478,6 +513,12 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                 metadata={},
             )
             synced_items += 1
+            synced_items += _sync_llm_bridge_artifacts(
+                store=store,
+                data_source=resolved_data_source,
+                scope="historical",
+                packet=overlay_packet,
+            )
 
         overlay_brief = load_overlay_brief(resolved_root, data_source=resolved_data_source, prefer_database=False)
         if overlay_brief:
@@ -519,6 +560,12 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
                 metadata={},
             )
             synced_items += 1
+            synced_items += _sync_llm_bridge_artifacts(
+                store=store,
+                data_source=resolved_data_source,
+                scope="inference",
+                packet=inference_packet,
+            )
 
         inference_brief = load_overlay_inference_brief(
             resolved_root,
@@ -535,14 +582,37 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
             )
             synced_items += 1
 
-        watchlist_summary = sync_watchlist_snapshot_artifact(
-            root=resolved_root,
+        inference_packet_key = json_artifact_key(resolved_data_source, "inference_packet")
+        inference_packet_payload = {} if _artifact_exists(store, inference_packet_key) else load_inference_packet(
+            resolved_root,
             data_source=resolved_data_source,
-            watchlist_config=watchlist_config,
+            prefer_database=False,
         )
-        if not watchlist_summary.ok:
-            raise RuntimeError(watchlist_summary.message)
-        synced_items += watchlist_summary.synced_items
+        if inference_packet_payload:
+            store.upsert_json(
+                artifact_key=inference_packet_key,
+                data_source=resolved_data_source,
+                artifact_kind="json",
+                payload=_json_ready(inference_packet_payload),
+                metadata={},
+            )
+            synced_items += 1
+
+        ensemble_weights_key = json_artifact_key(resolved_data_source, "ensemble_weights")
+        ensemble_weights_payload = {} if _artifact_exists(store, ensemble_weights_key) else load_ensemble_weights(
+            resolved_root,
+            data_source=resolved_data_source,
+            prefer_database=False,
+        )
+        if ensemble_weights_payload:
+            store.upsert_json(
+                artifact_key=ensemble_weights_key,
+                data_source=resolved_data_source,
+                artifact_kind="json",
+                payload=_json_ready(ensemble_weights_payload),
+                metadata={},
+            )
+            synced_items += 1
 
         holdings = watchlist_config.get("holdings", []) or []
         focus_pool = watchlist_config.get("focus_pool", []) or []

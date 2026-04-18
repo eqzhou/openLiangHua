@@ -1,18 +1,20 @@
 from __future__ import annotations
-
-import json
 from pathlib import Path
 
 import pandas as pd
 
 from src.agents.ensemble_weights import resolve_model_weights
+from src.app.repositories.report_repository import (
+    save_ensemble_weights_report,
+    save_model_split_reports,
+)
+from src.app.services.model_workspace_service import load_prediction_artifact, resolve_model_workspace
 from src.backtest.risk_filter import build_benchmark_proxy
 from src.models.evaluate import build_performance_diagnostics, summarize_predictions
 from src.models.stability import save_stability_summary
 from src.models.train_linear import load_dataset
 from src.models.walkforward import selection_kwargs
-from src.utils.data_source import active_data_source, source_or_canonical_path, source_prefixed_path
-from src.utils.io import ensure_dir, project_root
+from src.utils.io import ensure_dir
 from src.utils.logger import configure_logging
 
 logger = configure_logging()
@@ -21,14 +23,17 @@ MODEL_NAMES = ("ridge", "lgbm")
 
 
 def _prediction_path(reports_dir: Path, model_name: str, split_name: str, data_source: str) -> Path:
-    return source_or_canonical_path(reports_dir, f"{model_name}_{split_name}_predictions.csv", data_source)
+    return reports_dir / f"{data_source}_{model_name}_{split_name}_predictions.csv"
 
 
-def _load_prediction_frame(reports_dir: Path, model_name: str, split_name: str, data_source: str) -> pd.DataFrame:
-    path = _prediction_path(reports_dir, model_name=model_name, split_name=split_name, data_source=data_source)
-    if not path.exists():
-        return pd.DataFrame()
-    frame = pd.read_csv(path, parse_dates=["trade_date"])
+def _load_prediction_frame(workspace, model_name: str, split_name: str) -> pd.DataFrame:
+    frame = load_prediction_artifact(
+        workspace,
+        model_name=model_name,
+        split_name=split_name,
+    )
+    if frame.empty:
+        return frame
     renamed = frame.rename(
         columns={
             "score": f"{model_name}_score",
@@ -80,10 +85,11 @@ def _apply_ensemble_score(frame: pd.DataFrame, weights: dict[str, float]) -> pd.
 
 
 def run() -> None:
-    root = project_root()
+    workspace = resolve_model_workspace()
+    root = workspace.root
     reports_dir = ensure_dir(root / "reports" / "weekly")
     panel, experiment = load_dataset()
-    data_source = experiment.get("data_source", active_data_source())
+    data_source = experiment.get("data_source", workspace.data_source)
     overlay_config = experiment.get("overlay", {})
     benchmark_proxy = build_benchmark_proxy(panel, experiment=experiment)
     portfolio_kwargs = selection_kwargs(experiment)
@@ -102,10 +108,9 @@ def run() -> None:
     for split_name in ("valid", "test"):
         frames = {
             model_name: _load_prediction_frame(
-                reports_dir=reports_dir,
+                workspace=workspace,
                 model_name=model_name,
                 split_name=split_name,
-                data_source=data_source,
             )
             for model_name in MODEL_NAMES
         }
@@ -138,34 +143,18 @@ def run() -> None:
         metrics_by_split[split_name] = summary
         diagnostics_by_split[split_name] = diagnostics
 
-        scored.to_csv(source_prefixed_path(reports_dir, f"ensemble_{split_name}_predictions.csv", data_source), index=False)
-        portfolio.to_csv(source_prefixed_path(reports_dir, f"ensemble_{split_name}_portfolio.csv", data_source), index=False)
-        (source_prefixed_path(reports_dir, f"ensemble_{split_name}_metrics.json", data_source)).write_text(
-            json.dumps(summary, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        scored.to_csv(reports_dir / f"ensemble_{split_name}_predictions.csv", index=False)
-        portfolio.to_csv(reports_dir / f"ensemble_{split_name}_portfolio.csv", index=False)
-        (reports_dir / f"ensemble_{split_name}_metrics.json").write_text(
-            json.dumps(summary, indent=2, ensure_ascii=False),
-            encoding="utf-8",
+        save_model_split_reports(
+            root,
+            data_source=data_source,
+            model_name="ensemble",
+            split_name=split_name,
+            predictions=scored,
+            portfolio=portfolio,
+            metrics=summary,
+            diagnostics=diagnostics,
         )
 
-        for name, table in diagnostics.items():
-            if table.empty:
-                continue
-            table.to_csv(
-                source_prefixed_path(reports_dir, f"ensemble_{split_name}_{name}.csv", data_source),
-                index=False,
-            )
-            table.to_csv(reports_dir / f"ensemble_{split_name}_{name}.csv", index=False)
-
-    weight_path = source_prefixed_path(reports_dir, "ensemble_weights.json", data_source)
-    weight_path.write_text(json.dumps(weight_result, indent=2, ensure_ascii=False), encoding="utf-8")
-    (reports_dir / "ensemble_weights.json").write_text(
-        json.dumps(weight_result, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    save_ensemble_weights_report(root, data_source=data_source, payload=weight_result)
 
     if metrics_by_split:
         save_stability_summary(
@@ -176,10 +165,10 @@ def run() -> None:
         )
         logger.info(f"Saved ensemble reports to {reports_dir}")
 
-    from src.db.dashboard_sync import sync_dashboard_artifacts
+    from src.db.dashboard_sync import sync_watchlist_snapshot_artifact
 
-    summary = sync_dashboard_artifacts(root=root, data_source=data_source)
-    logger.info(summary.message if summary.ok else f"Dashboard DB sync failed: {summary.message}")
+    summary = sync_watchlist_snapshot_artifact(root=root, data_source=data_source)
+    logger.info(summary.message if summary.ok else f"Watchlist snapshot sync failed: {summary.message}")
 
 
 if __name__ == "__main__":

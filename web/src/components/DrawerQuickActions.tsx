@@ -7,8 +7,10 @@ interface DrawerQuickAction {
 }
 
 interface DrawerQuickActionsProps {
+  eyebrow?: string
   title?: string
   description?: string
+  meta?: string
   primaryActions?: DrawerQuickAction[]
   secondaryActions?: DrawerQuickAction[]
 }
@@ -24,8 +26,10 @@ function buttonClassName(tone: DrawerQuickAction['tone']): string {
 }
 
 export function DrawerQuickActions({
+  eyebrow,
   title = '快捷操作',
   description,
+  meta,
   primaryActions = [],
   secondaryActions = [],
 }: DrawerQuickActionsProps) {
@@ -40,9 +44,11 @@ export function DrawerQuickActions({
     <section className="drawer-action-shelf" aria-label={title}>
       <div className="drawer-action-shelf__header">
         <div>
+          {eyebrow ? <p className="drawer-action-shelf__eyebrow">{eyebrow}</p> : null}
           <h3 className="drawer-action-shelf__title">{title}</h3>
           {description ? <p className="drawer-action-shelf__description">{description}</p> : null}
         </div>
+        {meta ? <p className="drawer-action-shelf__meta">{meta}</p> : null}
       </div>
 
       {visiblePrimaryActions.length ? (

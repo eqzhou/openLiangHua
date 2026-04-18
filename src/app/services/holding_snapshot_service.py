@@ -64,6 +64,9 @@ def next_trade_date(trade_dates: pd.Series, as_of: pd.Timestamp | None) -> pd.Ti
 
 
 def latest_symbol_bar(daily_bar: pd.DataFrame, symbol: str) -> tuple[pd.Series | None, pd.Series | None]:
+    if daily_bar.empty or "ts_code" not in daily_bar.columns:
+        return None, None
+
     scoped = daily_bar.loc[daily_bar["ts_code"] == symbol].copy()
     if scoped.empty:
         return None, None

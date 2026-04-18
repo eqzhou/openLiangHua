@@ -33,7 +33,7 @@ export function describeRealtimeSource(source: unknown): {
     case 'mixed':
       return { label: '混合降级结果', mode: '混合', badgeTone: 'warn', isFallback: true }
     default:
-      return { label: '暂未刷新', mode: '待刷新', badgeTone: 'default', isFallback: false }
+      return { label: '待刷新', mode: '待刷新', badgeTone: 'default', isFallback: false }
   }
 }
 
@@ -55,7 +55,7 @@ export function describeRealtimeSnapshotMode(snapshotBucket: unknown, servedFrom
   if (source === 'database') {
     return { label: '数据库快照', tone: 'brand' }
   }
-  return { label: '实时刷新', tone: 'default' }
+  return { label: '已刷新', tone: 'default' }
 }
 
 export function formatRealtimeCoverage(requestedCount: unknown, successCount: unknown): string {

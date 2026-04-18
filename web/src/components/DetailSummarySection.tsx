@@ -25,6 +25,7 @@ interface DetailSummaryProperty {
 }
 
 interface DetailSummarySectionProps {
+  eyebrow?: string
   sectionTitle?: string
   sectionDescription?: string
   title: string
@@ -39,8 +40,9 @@ interface DetailSummarySectionProps {
 }
 
 export function DetailSummarySection({
-  sectionTitle = '当前摘要',
-  sectionDescription = '先看结论和关键字段，再按需展开后续信息。',
+  eyebrow,
+  sectionTitle = '当前概览',
+  sectionDescription,
   title,
   meta,
   subtitle,
@@ -52,7 +54,12 @@ export function DetailSummarySection({
   children,
 }: DetailSummarySectionProps) {
   return (
-    <SectionBlock title={sectionTitle} description={sectionDescription}>
+    <SectionBlock
+      title={sectionTitle}
+      description={sectionDescription}
+      eyebrow={eyebrow}
+      className="detail-summary-section"
+    >
       <div className="section-stack">
         <SpotlightCard title={title} meta={meta} subtitle={subtitle} badges={badges} metrics={metrics} actions={actions} />
         {properties.length ? <PropertyGrid items={properties} columns={propertyColumns} /> : null}

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from src.utils.io import ensure_dir, project_root, save_parquet
+from src.app.repositories.report_repository import save_binary_dataset, save_json_report
+from src.utils.io import ensure_dir, project_root
 from src.utils.logger import configure_logging
 
 logger = configure_logging()
@@ -24,7 +24,7 @@ def _read_cached_panel(path: Path) -> pd.DataFrame | None:
         return None
 
 
-def materialize_cache(min_age_seconds: int = 30) -> dict[str, int]:
+def materialize_cache(min_age_seconds: int = 30) -> dict[str, object]:
     root = project_root()
     raw_dir = root / "data" / "raw" / "akshare"
     staging_dir = ensure_dir(root / "data" / "staging")
@@ -45,7 +45,19 @@ def materialize_cache(min_age_seconds: int = 30) -> dict[str, int]:
             frames.append(frame)
 
     if not frames:
-        raise RuntimeError("No cached symbol files were safe to materialize yet.")
+        summary = {
+            "cached_files_total": len(cache_files),
+            "cached_files_materialized": 0,
+            "symbols_in_panel": 0,
+            "rows_in_panel": 0,
+            "date_min": None,
+            "date_max": None,
+            "status": "noop",
+            "message": "No cached symbol files were safe to materialize yet.",
+        }
+        save_json_report(root, data_source="akshare", filename="materialize_cache_summary.json", payload=summary)
+        logger.info(summary["message"])
+        return summary
 
     daily_bar = pd.concat(frames, ignore_index=True)
     daily_bar["trade_date"] = pd.to_datetime(daily_bar["trade_date"])
@@ -64,7 +76,14 @@ def materialize_cache(min_age_seconds: int = 30) -> dict[str, int]:
         daily_bar["index_weight"] = np.nan
         daily_bar["is_index_member"] = True
 
-    save_parquet(daily_bar, staging_dir / "daily_bar.parquet")
+    save_binary_dataset(
+        root,
+        data_source="akshare",
+        directory="data/staging",
+        filename="daily_bar.parquet",
+        artifact_name="daily_bar",
+        frame=daily_bar,
+    )
 
     summary = {
         "cached_files_total": len(cache_files),
@@ -74,10 +93,7 @@ def materialize_cache(min_age_seconds: int = 30) -> dict[str, int]:
         "date_min": str(daily_bar["trade_date"].min().date()),
         "date_max": str(daily_bar["trade_date"].max().date()),
     }
-    (reports_dir / "materialize_cache_summary.json").write_text(
-        json.dumps(summary, indent=2),
-        encoding="utf-8",
-    )
+    save_json_report(root, data_source="akshare", filename="materialize_cache_summary.json", payload=summary)
     logger.info(f"Materialized {summary['symbols_in_panel']} symbols into data/staging/daily_bar.parquet")
     return summary
 
@@ -96,7 +112,9 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     materialize_cache(min_age_seconds=max(0, args.min_age_seconds))
-    from src.db.dashboard_sync import sync_dashboard_artifacts
+    from src.db.dashboard_sync import sync_dataset_summary_artifact, sync_watchlist_snapshot_artifact
 
-    summary = sync_dashboard_artifacts()
-    logger.info(summary.message)
+    dataset_summary = sync_dataset_summary_artifact()
+    watchlist_summary = sync_watchlist_snapshot_artifact(data_source="akshare")
+    logger.info(dataset_summary.message)
+    logger.info(watchlist_summary.message)

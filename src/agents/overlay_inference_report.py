@@ -1,33 +1,48 @@
 from __future__ import annotations
 
-import json
-
 import pandas as pd
 
 from src.agents.llm_bridge import export_llm_requests
-from src.agents.overlay_report import DISPLAY_COLUMNS, _overlay_config, build_overlay_report_from_frames
+from src.app.services.ai_shortlist_service import save_overlay_inference_shortlist
+from src.agents.overlay_report import DISPLAY_COLUMNS, _overlay_config, _prefer_database, build_overlay_report_from_frames
+from src.app.repositories.config_repository import load_experiment_config
+from src.app.repositories.report_repository import (
+    load_overlay_llm_bundle,
+    load_predictions as repo_load_predictions,
+    save_overlay_outputs as repo_save_overlay_outputs,
+)
 from src.models.latest_inference import generate_latest_inference
-from src.utils.data_source import active_data_source, source_or_canonical_path, source_prefixed_path
-from src.utils.io import ensure_dir, load_yaml, project_root, save_text
+from src.utils.data_source import active_data_source
+from src.utils.io import ensure_dir, project_root
 from src.utils.logger import configure_logging
 
 logger = configure_logging()
 
 
 def _load_prediction_frame(root, data_source: str, filename: str) -> pd.DataFrame:
-    path = source_or_canonical_path(root / "reports" / "weekly", filename, data_source)
-    if not path.exists():
+    model_name = filename.replace("_inference_predictions.csv", "").strip()
+    if model_name not in {"lgbm", "ridge", "ensemble"}:
         return pd.DataFrame()
-    frame = pd.read_csv(path)
+
+    frame = repo_load_predictions(
+        root,
+        data_source=data_source,
+        model_name=model_name,
+        split_name="inference",
+        prefer_database=_prefer_database(root) if root is not None else True,
+    )
+    if frame.empty:
+        return frame
+    frame = frame.copy()
     if "trade_date" in frame.columns:
-        frame["trade_date"] = pd.to_datetime(frame["trade_date"])
+        frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
     return frame
 
 
 def run() -> None:
     root = project_root()
     reports_dir = ensure_dir(root / "reports" / "weekly")
-    experiment = load_yaml(root / "config" / "experiment.yaml")
+    experiment = load_experiment_config(root, prefer_database=False)
     data_source = active_data_source()
     overlay = _overlay_config(experiment)
 
@@ -47,19 +62,14 @@ def run() -> None:
     packet["inference_packet"] = inference_packet
 
     export_frame = overlay_candidates[[column for column in DISPLAY_COLUMNS if column in overlay_candidates.columns]].copy()
-    csv_source_path = source_prefixed_path(reports_dir, "overlay_inference_candidates.csv", data_source)
-    json_source_path = source_prefixed_path(reports_dir, "overlay_inference_packet.json", data_source)
-    markdown_source_path = source_prefixed_path(reports_dir, "overlay_inference_brief.md", data_source)
-
-    export_frame.to_csv(csv_source_path, index=False, encoding="utf-8-sig")
-    export_frame.to_csv(reports_dir / "overlay_inference_candidates.csv", index=False, encoding="utf-8-sig")
-    json_source_path.write_text(json.dumps(packet, ensure_ascii=False, indent=2), encoding="utf-8")
-    (reports_dir / "overlay_inference_packet.json").write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    repo_save_overlay_outputs(
+        root=root,
+        data_source=data_source,
+        scope="inference",
+        candidates=export_frame,
+        packet=packet,
+        brief=markdown,
     )
-    save_text(markdown, markdown_source_path)
-    save_text(markdown, reports_dir / "overlay_inference_brief.md")
 
     llm_artifacts = export_llm_requests(
         packet=packet,
@@ -68,15 +78,35 @@ def run() -> None:
         output_prefix="overlay_inference_llm",
     )
     packet["llm_bridge"] = llm_artifacts
-    json_source_path.write_text(json.dumps(packet, ensure_ascii=False, indent=2), encoding="utf-8")
-    (reports_dir / "overlay_inference_packet.json").write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    llm_bundle = load_overlay_llm_bundle(
+        root=root,
+        data_source=data_source,
+        scope="inference",
+        packet=packet,
+        prefer_database=False,
     )
-    from src.db.dashboard_sync import sync_dashboard_artifacts
+    shortlist_artifact = save_overlay_inference_shortlist(
+        packet=packet,
+        response_lookup=dict(llm_bundle.get("response_lookup", {}) or {}),
+        root=root,
+        data_source=data_source,
+    )
+    packet["shortlist"] = {
+        "source_path": shortlist_artifact["source_path"],
+        "row_count": len(shortlist_artifact["rows"]),
+    }
+    repo_save_overlay_outputs(
+        root=root,
+        data_source=data_source,
+        scope="inference",
+        candidates=export_frame,
+        packet=packet,
+        brief=markdown,
+    )
+    from src.db.dashboard_sync import sync_watchlist_snapshot_artifact
 
-    summary = sync_dashboard_artifacts(root=root, data_source=data_source)
-    logger.info(summary.message if summary.ok else f"Dashboard DB sync failed: {summary.message}")
+    summary = sync_watchlist_snapshot_artifact(root=root, data_source=data_source)
+    logger.info(summary.message if summary.ok else f"Watchlist snapshot sync failed: {summary.message}")
     logger.info(f"Saved overlay inference reports to {reports_dir}")
 
 

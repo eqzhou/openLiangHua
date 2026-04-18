@@ -27,17 +27,17 @@ export function DrawerEntityActions({
       </button>
       {onOpenAiReview ? (
         <button type="button" className="button button--ghost" onClick={onOpenAiReview}>
-          查看 AI 研判
+          查看 AI 分析
         </button>
       ) : null}
       {onOpenWatchlist ? (
         <button type="button" className="button button--ghost" onClick={onOpenWatchlist}>
-          跳到持仓页
+          查看持仓
         </button>
       ) : null}
       {onOpenCandidates ? (
         <button type="button" className="button button--ghost" onClick={onOpenCandidates}>
-          跳到候选页
+          查看候选
         </button>
       ) : null}
       {extraActions}

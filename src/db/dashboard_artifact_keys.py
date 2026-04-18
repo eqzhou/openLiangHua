@@ -33,5 +33,31 @@ def text_artifact_key(data_source: str, name: str) -> str:
     return f"{data_source}:text:{name}"
 
 
+def overlay_llm_responses_artifact_key(data_source: str, scope: str) -> str:
+    prefix = "overlay_inference" if scope == "inference" else "overlay"
+    return text_artifact_key(data_source, f"{prefix}_llm_responses")
+
+
+def overlay_llm_response_summary_artifact_key(data_source: str, scope: str) -> str:
+    prefix = "overlay_inference" if scope == "inference" else "overlay"
+    return text_artifact_key(data_source, f"{prefix}_llm_response_summary")
+
+
+def event_notice_cache_artifact_key(data_source: str, notice_date: str) -> str:
+    return binary_artifact_key(data_source, f"event_notice:{notice_date}")
+
+
+def event_research_cache_artifact_key(data_source: str, symbol_code: str) -> str:
+    return binary_artifact_key(data_source, f"event_research:{symbol_code}")
+
+
+def event_news_cache_artifact_key(data_source: str, symbol_code: str) -> str:
+    return binary_artifact_key(data_source, f"event_news:{symbol_code}")
+
+
+def llm_bridge_export_artifact_key(data_source: str, output_prefix: str, name: str) -> str:
+    return text_artifact_key(data_source, f"{output_prefix}_{name}")
+
+
 def note_artifact_key(data_source: str, symbol: str, note_kind: str) -> str:
     return f"{data_source}:note:{symbol}:{note_kind}"

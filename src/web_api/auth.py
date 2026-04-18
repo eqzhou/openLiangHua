@@ -79,6 +79,7 @@ class PostgresAuthStore:
             user=self.settings.db_user,
             password=self.settings.db_password,
             connect_timeout=self.settings.db_connect_timeout,
+            options=f"-c search_path={self.settings.db_schema},public",
             row_factory=dict_row,
         )
 

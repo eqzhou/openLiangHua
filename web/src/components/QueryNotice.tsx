@@ -8,10 +8,10 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message
   }
-  return '请求失败，请稍后重试。'
+  return '加载失败，请稍后再试。'
 }
 
-export function QueryNotice({ isLoading, error, loadingText = '正在加载最新数据...' }: QueryNoticeProps) {
+export function QueryNotice({ isLoading, error, loadingText = '加载中...' }: QueryNoticeProps) {
   if (error) {
     return (
       <div className="query-notice query-notice--error" role="status">

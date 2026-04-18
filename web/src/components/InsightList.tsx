@@ -5,7 +5,7 @@ interface InsightListProps {
   tone?: 'default' | 'good' | 'warn'
 }
 
-export function InsightList({ title, items, emptyText = '暂无要点', tone = 'default' }: InsightListProps) {
+export function InsightList({ title, items, emptyText = '暂无信息', tone = 'default' }: InsightListProps) {
   return (
     <section className={`insight-card insight-card--${tone}`}>
       <h3 className="insight-card__title">{title}</h3>

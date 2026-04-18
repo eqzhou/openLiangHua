@@ -9,6 +9,7 @@ import { ControlGrid } from '../components/ControlGrid'
 import { DataTable } from '../components/DataTable'
 import { EntityCell } from '../components/EntityCell'
 import { LineChartCard } from '../components/LineChartCard'
+import { MetricCard } from '../components/MetricCard'
 import { PageFilterBar } from '../components/PageFilterBar'
 import { Panel } from '../components/Panel'
 import { PropertyGrid } from '../components/PropertyGrid'
@@ -17,6 +18,7 @@ import { SectionBlock } from '../components/SectionBlock'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { SpotlightCard } from '../components/SpotlightCard'
 import { SupportPanel } from '../components/SupportPanel'
+import { WorkspaceHero } from '../components/WorkspaceHero'
 import {
   factorExplorerDetailClient,
   factorExplorerPageClient,
@@ -41,8 +43,8 @@ const MISSING_COLUMN_LABELS = {
 }
 
 const FACTOR_RANKING_PRESETS = [
-  { key: 'compact', label: '精简视图', columns: ['name', 'close_to_ma_20'] },
-  { key: 'focus', label: '关注视图', columns: ['name', 'close_to_ma_20'] },
+  { key: 'compact', label: '精简', columns: ['name', 'close_to_ma_20'] },
+  { key: 'focus', label: '关注', columns: ['name', 'close_to_ma_20'] },
 ]
 
 function buildHistoryViewOptions(keys: string[]) {
@@ -116,7 +118,7 @@ export function FactorExplorerPage() {
           subtitle={String(row.ts_code ?? '')}
           meta={`当前因子 ${formatValue(summaryQuery.data?.selectedFactor ?? params.factor)}`}
           badges={[
-            String(row.ts_code ?? '') === String(topRank?.ts_code ?? '') ? { label: '头部标的', tone: 'good' as const } : null,
+            String(row.ts_code ?? '') === String(topRank?.ts_code ?? '') ? { label: '头部股票', tone: 'good' as const } : null,
           ].filter(Boolean) as Array<{ label: string; tone?: 'default' | 'brand' | 'good' | 'warn' }>}
         />
       ),
@@ -131,7 +133,7 @@ export function FactorExplorerPage() {
       { label: '历史序列', value: summaryQuery.data?.selectedHistoryFactor ?? params.historyFactor },
       { label: '当前股票', value: summaryQuery.data?.selectedSymbol ?? params.symbol },
       {
-        label: '头部标的',
+        label: '头部股票',
         value: topRank ? `${formatValue(topRank.ts_code)} / ${formatValue(topRank.name)}` : '-',
         helper: topRank ? `因子值 ${formatValue(topRank.close_to_ma_20)}` : '',
       },
@@ -148,33 +150,40 @@ export function FactorExplorerPage() {
     ],
   )
 
+  const factorHeroBadges = (
+    <>
+      <Badge tone={summaryQuery.data?.available ? 'good' : 'warn'}>{summaryQuery.data?.available ? '因子可用' : '因子缺失'}</Badge>
+      <Badge tone="brand">{String(summaryQuery.data?.selectedFactor ?? params.factor)}</Badge>
+      <Badge tone="default">{String(summaryQuery.data?.selectedHistoryFactor ?? params.historyFactor)}</Badge>
+      <Badge tone={topRank ? 'good' : 'default'}>{topRank ? `头部 ${String(topRank.name ?? topRank.ts_code ?? '-')}` : '暂无头部股票'}</Badge>
+    </>
+  )
+
   return (
     <div className="page-stack">
-      <Panel
+      <WorkspaceHero
         title="因子探索"
-        subtitle={
-          summaryQuery.data?.latestDate
-            ? `最新截面 ${formatDate(summaryQuery.data.latestDate)}。先看总表，再看单股。`
-            : '先看总表，再看单股。'
-        }
-        tone="warm"
-        className="panel--summary-surface"
-      >
+        badges={factorHeroBadges}
+      />
+
+      <div className="metric-grid metric-grid--four">
+        <MetricCard label="可用因子数" value={factorOptions.length} />
+        <MetricCard label="样本股票数" value={summaryQuery.data?.symbolOptions?.length ?? 0} />
+        <MetricCard label="排名条数" value={ranking.length} />
+        <MetricCard label="缺失率记录数" value={missingRates.length} tone={missingRates.length ? 'warn' : 'default'} />
+      </div>
+
+      <Panel title="筛选" subtitle={summaryQuery.data?.latestDate ? `最新截面 ${formatDate(summaryQuery.data.latestDate)}` : undefined} tone="warm" className="panel--summary-surface">
         <QueryNotice isLoading={summaryQuery.isLoading} error={summaryQuery.error ?? detailQuery.error} />
 
-        <SectionBlock
-          title="先看当前因子结论"
-          description="先确认可用性、头部标的和缺失风险。"
-          tone="emphasis"
-        >
+        <SectionBlock title="概览" tone="emphasis">
           {selectedFactorDescription ? <p className="helper-text">{selectedFactorDescription}</p> : null}
           <SpotlightCard
             title={String((summaryQuery.data?.selectedFactor ?? params.factor) || '未选择因子')}
             meta={summaryQuery.data?.latestDate ? `最新截面 ${formatDate(summaryQuery.data.latestDate)}` : '当前因子'}
-            subtitle="先看可用性、头部标的和缺失率风险，再切到完整排名和单股历史。"
             badges={[
-              { label: summaryQuery.data?.available ? '因子可用' : '因子不可用', tone: summaryQuery.data?.available ? 'good' : 'warn' },
-              { label: topRank ? `头部标的 ${formatValue(topRank.name)}` : '暂无头部标的', tone: topRank ? 'good' : 'default' },
+              { label: summaryQuery.data?.available ? '因子可用' : '因子缺失', tone: summaryQuery.data?.available ? 'good' : 'warn' },
+              { label: topRank ? `头部股票 ${formatValue(topRank.name)}` : '暂无头部股票', tone: topRank ? 'good' : 'default' },
             ]}
             metrics={[
               { label: '可用因子数', value: factorOptions.length },
@@ -188,12 +197,11 @@ export function FactorExplorerPage() {
         <ContextStrip items={factorContextItems} />
 
         <PageFilterBar
-          title="切换因子工作区"
-          description="用同一组筛选在总表和单股间切换。"
+          title="切换因子"
           meta={
             <div className="badge-row">
               <Badge tone={summaryQuery.data?.available ? 'good' : 'warn'}>
-                {summaryQuery.data?.available ? '因子可用' : '因子不可用'}
+                {summaryQuery.data?.available ? '因子可用' : '因子缺失'}
               </Badge>
               <Badge tone="brand">{String((summaryQuery.data?.selectedSymbol ?? params.symbol) || '-')}</Badge>
             </div>
@@ -235,7 +243,7 @@ export function FactorExplorerPage() {
       </Panel>
 
       <div className="split-layout">
-        <Panel title="因子排名" subtitle="先看总表。" tone="calm" className="panel--table-surface">
+        <Panel title="因子排名" tone="calm" className="panel--table-surface">
           <DataTable
             rows={ranking}
             columns={RANKING_COLUMNS}
@@ -250,7 +258,7 @@ export function FactorExplorerPage() {
           />
         </Panel>
 
-        <Panel title="缺失率" subtitle="只看覆盖风险。" tone="calm" className="panel--table-surface">
+        <SupportPanel title="缺失">
           <DataTable
             rows={missingRates}
             columns={MISSING_COLUMNS}
@@ -259,19 +267,18 @@ export function FactorExplorerPage() {
             emptyText="暂无缺失率数据"
             stickyFirstColumn
           />
-        </Panel>
+        </SupportPanel>
       </div>
 
       <div className="split-layout">
-        <Panel title="当前标的摘要" subtitle="总表选中后再看单票。" className="panel--summary-surface">
-          <SectionBlock title="当前股票快照" description="先看位置和风险。">
+        <Panel title="当前股票" className="panel--summary-surface">
+          <SectionBlock title="当前股票快照">
             <SpotlightCard
               title={String(selectedRecord.name ?? summaryQuery.data?.selectedSymbol ?? '未选择股票')}
               meta={String(summaryQuery.data?.selectedSymbol ?? '-')}
-              subtitle="结合总排名看当前标的，再决定要不要继续看时间序列。"
               badges={[
                 selectedRecord.industry ? { label: String(selectedRecord.industry), tone: 'brand' as const } : null,
-                topRank && String(topRank.ts_code ?? '') === String(summaryQuery.data?.selectedSymbol ?? '') ? { label: '当前头部标的', tone: 'good' as const } : null,
+                topRank && String(topRank.ts_code ?? '') === String(summaryQuery.data?.selectedSymbol ?? '') ? { label: '当前头部股票', tone: 'good' as const } : null,
               ].filter(Boolean) as Array<{ label: string; tone?: 'default' | 'brand' | 'good' | 'warn' }>}
               metrics={[
                 { label: '距 20 日线', value: formatValue(selectedRecord.close_to_ma_20) },
@@ -283,8 +290,8 @@ export function FactorExplorerPage() {
           </SectionBlock>
         </Panel>
 
-        <SupportPanel title="因子字段快照" subtitle="完整字段后置。">
-          <SectionBlock title="完整字段快照" description="需要时再核对原始字段。" collapsible defaultExpanded={false}>
+        <SupportPanel title="字段">
+          <SectionBlock title="完整字段快照" collapsible defaultExpanded={false}>
             <DataTable
               rows={detailQuery.data?.snapshot ?? []}
               columns={SNAPSHOT_COLUMNS}
@@ -296,12 +303,8 @@ export function FactorExplorerPage() {
         </SupportPanel>
       </div>
 
-      <SupportPanel title="个股因子历史" subtitle="历史曲线后置。">
-        <SectionBlock
-          title="历史因子走势"
-          description="最后再看时间序列。"
-          tone="emphasis"
-        >
+      <SupportPanel title="历史">
+        <SectionBlock title="历史因子走势" tone="emphasis">
           <PropertyGrid
             items={[
               { label: '当前因子', value: formatValue(summaryQuery.data?.selectedFactor ?? params.factor), span: 'double' },
@@ -324,14 +327,14 @@ export function FactorExplorerPage() {
           actions={
             historyViewOptions.length > 1 ? (
               <SegmentedControl
-                label="切换因子历史视图"
+                label="切换因子预设"
                 value={activeHistoryView?.key ?? historyViewOptions[0].key}
                 options={historyViewOptions.map((option) => ({ key: option.key, label: option.label }))}
                 onChange={setHistoryView}
               />
             ) : null
           }
-          emptyText={detailQuery.isLoading ? '正在加载因子历史' : '暂无因子历史'}
+          emptyText={detailQuery.isLoading ? '加载中...' : '暂无因子历史'}
         />
       </SupportPanel>
     </div>

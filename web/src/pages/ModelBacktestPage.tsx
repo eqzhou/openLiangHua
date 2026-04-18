@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '../api/client'
+import { Badge } from '../components/Badge'
 import { ComparisonBoard } from '../components/ComparisonBoard'
 import { ContextStrip } from '../components/ContextStrip'
 import { ControlField } from '../components/ControlField'
@@ -10,6 +11,7 @@ import { DataTable } from '../components/DataTable'
 import { EntityCell } from '../components/EntityCell'
 import { InsightList } from '../components/InsightList'
 import { LineChartCard } from '../components/LineChartCard'
+import { MetricCard } from '../components/MetricCard'
 import { PageFilterBar } from '../components/PageFilterBar'
 import { Panel } from '../components/Panel'
 import { PropertyGrid } from '../components/PropertyGrid'
@@ -18,6 +20,7 @@ import { SectionBlock } from '../components/SectionBlock'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { SpotlightCard } from '../components/SpotlightCard'
 import { SupportPanel } from '../components/SupportPanel'
+import { WorkspaceHero } from '../components/WorkspaceHero'
 import { modelBacktestPageClient } from '../facades/dashboardPageClient'
 import { usePageSearchState } from '../facades/usePageSearchState'
 import { formatPercent, formatValue } from '../lib/format'
@@ -65,30 +68,30 @@ const CHECK_LABELS: Record<string, string> = {
 }
 
 const IMPORTANCE_PRESETS = [
-  { key: 'gain', label: 'Gain 视图', columns: ['feature', 'importance_gain'] },
-  { key: 'full', label: '完整视图', columns: ['feature', 'importance_gain', 'importance_split'] },
+  { key: 'gain', label: '增益', columns: ['feature', 'importance_gain'] },
+  { key: 'full', label: '完整', columns: ['feature', 'importance_gain', 'importance_split'] },
 ]
 
 const YEARLY_DIAGNOSTIC_PRESETS = [
-  { key: 'performance', label: '绩效视图', columns: ['year', 'annualized_return', 'sharpe', 'max_drawdown'] },
-  { key: 'execution', label: '执行视图', columns: ['year', 'win_rate', 'risk_on_ratio'] },
+  { key: 'performance', label: '绩效', columns: ['year', 'annualized_return', 'sharpe', 'max_drawdown'] },
+  { key: 'execution', label: '执行', columns: ['year', 'win_rate', 'risk_on_ratio'] },
 ]
 
 const REGIME_DIAGNOSTIC_PRESETS = [
-  { key: 'performance', label: '绩效视图', columns: ['regime', 'annualized_return', 'sharpe', 'max_drawdown'] },
-  { key: 'execution', label: '执行视图', columns: ['regime', 'win_rate', 'risk_on_ratio'] },
+  { key: 'performance', label: '绩效', columns: ['regime', 'annualized_return', 'sharpe', 'max_drawdown'] },
+  { key: 'execution', label: '执行', columns: ['regime', 'win_rate', 'risk_on_ratio'] },
 ]
 
 const PORTFOLIO_VIEW_SPECS = [
-  { key: 'equity', label: '净值曲线', lineKeys: ['equity_curve'], subtitle: '先看累计资金曲线，确认整体趋势和回撤位置。' },
-  { key: 'period', label: '区间收益', lineKeys: ['net_return', 'benchmark_proxy_period_return'], subtitle: '比较组合和基准在每个持有周期的单期收益。' },
-  { key: 'filtered', label: '风控前后', lineKeys: ['net_return', 'net_return_unfiltered'], subtitle: '比较风控过滤前后的收益差异。' },
+  { key: 'equity', label: '净值曲线', lineKeys: ['equity_curve'], subtitle: '累计资金曲线' },
+  { key: 'period', label: '区间收益', lineKeys: ['net_return', 'benchmark_proxy_period_return'], subtitle: '组合与基准对比' },
+  { key: 'filtered', label: '风控前后', lineKeys: ['net_return', 'net_return_unfiltered'], subtitle: '风控前后收益对比' },
 ]
 
 const EXECUTION_VIEW_SPECS = [
-  { key: 'selection', label: '持仓节奏', lineKeys: ['selected_count', 'overlap_count', 'retained_count'], subtitle: '观察每期入选数量、保留数量和重叠数量的节奏。' },
-  { key: 'turnover', label: '换手节奏', lineKeys: ['turnover_ratio', 'holding_period_days'], subtitle: '确认换手和持有期是否稳定。' },
-  { key: 'benchmark', label: '基准状态', lineKeys: ['benchmark_proxy_return', 'benchmark_proxy_period_return'], subtitle: '比较基准单期收益和持有期收益代理。' },
+  { key: 'selection', label: '持仓节奏', lineKeys: ['selected_count', 'overlap_count', 'retained_count'], subtitle: '持仓数量变化' },
+  { key: 'turnover', label: '换手节奏', lineKeys: ['turnover_ratio', 'holding_period_days'], subtitle: '换手率与持有期' },
+  { key: 'benchmark', label: '基准状态', lineKeys: ['benchmark_proxy_return', 'benchmark_proxy_period_return'], subtitle: '基准收益' },
 ]
 
 function buildChartViews(rows: JsonRecord[], specs: Array<{ key: string; label: string; lineKeys: string[]; subtitle: string }>) {
@@ -226,23 +229,43 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
     [backtestQuery.data?.modelName, backtestQuery.data?.splitName, metrics.holding_period_days, params.model, params.split, stability.conclusion, stability.grade, stability.passed_checks, stability.total_checks, stabilityTone],
   )
 
+  const backtestHeroBadges = (
+    <>
+      <Badge tone="brand">{String(backtestQuery.data?.modelName ?? params.model).toUpperCase()}</Badge>
+      <Badge tone="default">{String(backtestQuery.data?.splitName ?? params.split).toUpperCase()}</Badge>
+      <Badge tone={stabilityTone}>{`稳定性 ${String(stability.grade ?? '待确认')}`}</Badge>
+      <Badge tone={failedChecks.length ? 'warn' : 'good'}>{`${formatValue(stability.passed_checks)} / ${formatValue(stability.total_checks)} 项通过`}</Badge>
+    </>
+  )
+
   return (
     <div className="page-stack">
-      <Panel
+      <WorkspaceHero
         title="模型回测"
-        subtitle="先看结论，再看曲线和诊断。"
-        tone="warm"
-        className="panel--summary-surface"
-      >
+        badges={backtestHeroBadges}
+      />
+
+      <div className="metric-grid metric-grid--four">
+        <MetricCard
+          label="年化收益"
+          value={formatPercent(metrics.daily_portfolio_annualized_return)}
+          tone={typeof metrics.daily_portfolio_annualized_return === 'number' && Number(metrics.daily_portfolio_annualized_return) > 0 ? 'good' : 'warn'}
+        />
+        <MetricCard label="夏普比率" value={metrics.daily_portfolio_sharpe ?? '-'} tone="good" />
+        <MetricCard label="最大回撤" value={formatPercent(metrics.daily_portfolio_max_drawdown)} tone="warn" />
+        <MetricCard label="TopN 命中率" value={formatPercent(metrics.top_n_hit_rate)} />
+      </div>
+
+      <Panel title="筛选" tone="warm" className="panel--summary-surface">
         <QueryNotice isLoading={backtestQuery.isLoading} error={backtestQuery.error} />
 
-        <SectionBlock title="先看回测结论" description="先判断值不值得继续看。" tone="emphasis">
+        <SectionBlock title="回测结论" tone="emphasis">
           <SpotlightCard
             title={String(backtestQuery.data?.modelName ?? params.model).toUpperCase()}
             meta={String(backtestQuery.data?.splitName ?? params.split).toUpperCase()}
-            subtitle={String(stability.conclusion ?? '暂无稳定性结论。')}
+            subtitle={String(stability.conclusion ?? '待确认')}
             badges={[
-              { label: `稳定性 ${String(stability.grade ?? '待评估')}`, tone: stabilityTone },
+              { label: `稳定性 ${String(stability.grade ?? '待确认')}`, tone: stabilityTone },
               { label: `持有期 ${formatValue(metrics.holding_period_days)} 天`, tone: 'brand' },
               { label: `${formatValue(stability.passed_checks)} / ${formatValue(stability.total_checks)} 项通过` },
             ]}
@@ -269,10 +292,7 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
 
         <ContextStrip items={backtestContextItems} />
 
-        <PageFilterBar
-          title="切换当前回测视角"
-          description="模型和分段共用同一口径。"
-        >
+        <PageFilterBar title="切换当前回测视角">
           <ControlGrid variant="double">
             <ControlField label="模型">
               <select value={params.model} onChange={(event) => updateParams({ model: event.target.value })}>
@@ -296,12 +316,12 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
         </PageFilterBar>
       </Panel>
 
-      <Panel title="验证 / 测试对比" subtitle="先看样本内外差异。" tone="calm" className="panel--summary-surface">
+      <Panel title="对比" tone="calm" className="panel--summary-surface">
         <ComparisonBoard columns={stabilityComparisonColumns} rows={stabilityComparisonRows} />
       </Panel>
 
       <div className="split-layout">
-        <Panel title="组合曲线区" subtitle="先看净值，再切收益/风控。" tone="calm" className="panel--table-surface">
+        <Panel title="净值" tone="calm" className="panel--table-surface">
           <LineChartCard
             data={portfolioRows}
             xKey="trade_date"
@@ -311,7 +331,7 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
             actions={
               activePortfolioView ? (
                 <SegmentedControl
-                  label="切换组合曲线视图"
+                  label="切换净值预设"
                   value={activePortfolioView.key}
                   options={portfolioViews.map((item) => ({ key: item.key, label: item.label }))}
                   onChange={setPortfolioView}
@@ -322,7 +342,7 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
           />
         </Panel>
 
-        <Panel title="执行节奏区" subtitle="看换手、持仓和基准节奏。" tone="calm" className="panel--table-surface">
+        <Panel title="节奏" tone="calm" className="panel--table-surface">
           <LineChartCard
             data={portfolioRows}
             xKey="trade_date"
@@ -332,7 +352,7 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
             actions={
               activeExecutionView ? (
                 <SegmentedControl
-                  label="切换执行节奏视图"
+                  label="切换节奏预设"
                   value={activeExecutionView.key}
                   options={executionViews.map((item) => ({ key: item.key, label: item.label }))}
                   onChange={setExecutionView}
@@ -345,10 +365,10 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
       </div>
 
       <div className="split-layout">
-        <Panel title="按月收益" subtitle="只保留月度节奏。" tone="calm" className="panel--table-surface">
+        <Panel title="月度" tone="calm" className="panel--table-surface">
           <DataTable rows={backtestQuery.data?.monthlySummary ?? []} columns={MONTHLY_COLUMNS} storageKey="backtest-monthly" columnLabels={MONTHLY_COLUMN_LABELS} emptyText="暂无月度汇总" cellRenderers={backtestCellRenderers} />
         </Panel>
-        <Panel title="核心因子贡献" subtitle="只看特征前排。" tone="calm" className="panel--table-surface">
+        <Panel title="因子" tone="calm" className="panel--table-surface">
           <DataTable
             rows={backtestQuery.data?.importance ?? []}
             columns={IMPORTANCE_COLUMNS}
@@ -363,7 +383,7 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
       </div>
 
       <div className="split-layout">
-        <Panel title="年度诊断" subtitle="年度表现总表。" tone="calm" className="panel--table-surface">
+        <Panel title="年度" tone="calm" className="panel--table-surface">
           <DataTable
             rows={backtestQuery.data?.yearlyDiagnostics ?? []}
             columns={YEARLY_COLUMNS}
@@ -375,7 +395,7 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
             cellRenderers={backtestCellRenderers}
           />
         </Panel>
-        <Panel title="阶段诊断" subtitle="看是否依赖某类市场环境。" tone="calm" className="panel--table-surface">
+        <Panel title="阶段" tone="calm" className="panel--table-surface">
           <DataTable
             rows={backtestQuery.data?.regimeDiagnostics ?? []}
             columns={REGIME_COLUMNS}
@@ -390,8 +410,8 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
       </div>
 
       <div className="split-layout">
-        <SupportPanel title="策略概览" subtitle="运行体量和节奏后置。">
-          <SectionBlock title="运行摘要" description="需要时再看体量和基准状态。" collapsible defaultExpanded={false}>
+        <SupportPanel title="概况">
+          <SectionBlock title="运行概览" collapsible defaultExpanded={false}>
             <PropertyGrid
               items={[
                 { label: '观测样本数', value: formatValue(metrics.observations) },
@@ -407,8 +427,8 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
           </SectionBlock>
         </SupportPanel>
 
-        <SupportPanel title="稳定性判断" subtitle="通过项和风险点后置。">
-          <SectionBlock title="检查结论" description="需要时再核对风险点。" collapsible defaultExpanded={false}>
+        <SupportPanel title="稳定性">
+          <SectionBlock title="检查结论" collapsible defaultExpanded={false}>
             <div className="split-layout">
               <InsightList title="通过项" items={passedChecks} tone="good" emptyText="暂无通过项" />
               <InsightList title="待关注项" items={failedChecks} tone="warn" emptyText="暂无待关注项" />

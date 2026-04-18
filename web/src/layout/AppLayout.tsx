@@ -18,30 +18,48 @@ interface AppLayoutProps {
 const navSections = [
   {
     key: 'workspace',
-    label: '工作区',
+    label: '操作',
     items: [
-      { to: '/', label: '主操作台' },
-      { to: '/workspace', label: '高级工作台' },
+      { to: '/', label: '首页' },
+      { to: '/workspace', label: '工作台' },
     ],
   },
   {
     key: 'research',
     label: '研究',
     items: [
-      { to: '/overview', label: '研究总览' },
+      { to: '/overview', label: '研究概览' },
       { to: '/factors', label: '因子探索' },
       { to: '/backtests', label: '模型回测' },
-      { to: '/candidates', label: '候选股票' },
-      { to: '/watchlist', label: '观察持仓' },
-      { to: '/ai-review', label: 'AI 研判' },
+      { to: '/candidates', label: '候选股' },
+      { to: '/watchlist', label: '持仓' },
+      { to: '/ai-review', label: 'AI 分析' },
     ],
   },
   {
     key: 'system',
     label: '系统',
-    items: [{ to: '/service', label: '页面服务' }],
+    items: [
+      { to: '/data', label: '数据管理' },
+      { to: '/service', label: '页面服务' },
+    ],
   },
 ]
+
+const bottomNavItems = [
+  { to: '/', label: '概览' },
+  { to: '/workspace', label: '工作台' },
+  { to: '/overview', label: '研究' },
+  { to: '/watchlist', label: '持仓' },
+  { to: '/service', label: '系统' },
+]
+
+function isNavItemActive(pathname: string, to: string) {
+  if (to === '/') {
+    return pathname === '/'
+  }
+  return pathname.startsWith(to)
+}
 
 export function AppLayout({
   children,
@@ -93,11 +111,15 @@ export function AppLayout({
       <header className="app-topbar">
         <div className="app-topbar__inner">
           <div className="app-topbar__brand-group">
-            <strong className="app-topbar__brand">OpenLianghua</strong>
-            <span className="app-topbar__divider" aria-hidden="true">
-              /
-            </span>
-            <span className="app-topbar__page">{activeItem.label}</span>
+            <div className="app-topbar__brand-stack">
+              <div className="app-topbar__brand-line">
+                <strong className="app-topbar__brand">OpenLianghua</strong>
+                <span className="app-topbar__divider" aria-hidden="true">
+                  /
+                </span>
+                <span className="app-topbar__page">{activeItem.label}</span>
+              </div>
+            </div>
           </div>
 
           <div className="app-topbar__actions">
@@ -158,7 +180,7 @@ export function AppLayout({
                 </>
               ) : (
                 <button type="button" className="button button--ghost button--small" onClick={openLoginDialog} disabled={authLoading || loginPending}>
-                  {authLoading ? '校验中...' : loginPending ? '登录中...' : '登录'}
+                  {authLoading ? '检查中...' : loginPending ? '登录中...' : '登录'}
                 </button>
               )}
             </div>
@@ -205,6 +227,21 @@ export function AppLayout({
 
         <main className="workspace-main workspace-main--shell">{children}</main>
       </div>
+
+      <nav className="bottom-tab-bar" aria-label="移动端底部导航">
+        {bottomNavItems.map((item) => {
+          const active = isNavItemActive(location.pathname, item.to)
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={`bottom-tab-bar__link${active ? ' bottom-tab-bar__link--active' : ''}`}
+            >
+              <span className="bottom-tab-bar__label">{item.label}</span>
+            </NavLink>
+          )
+        })}
+      </nav>
 
       <LoginDialog
         key={loginDialogVersion}

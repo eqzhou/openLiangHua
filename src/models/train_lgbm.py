@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-import json
-
 import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
 from sklearn.impute import SimpleImputer
 
+from src.app.repositories.report_repository import (
+    save_feature_importance_report,
+    save_feature_quality_report,
+    save_model_split_reports,
+)
+from src.app.services.model_workspace_service import resolve_model_workspace
 from src.backtest.risk_filter import build_benchmark_proxy
 from src.models.evaluate import build_performance_diagnostics, summarize_predictions
 from src.models.feature_selection import select_feature_columns
 from src.models.stability import save_stability_summary
 from src.models.train_linear import infer_feature_columns, load_dataset, split_dataset
 from src.models.walkforward import apply_research_filters, selection_kwargs, walk_forward_score
-from src.utils.data_source import active_data_source, source_prefixed_path
 from src.utils.io import ensure_dir, project_root
 from src.utils.logger import configure_logging
 
@@ -21,10 +24,11 @@ logger = configure_logging()
 
 
 def run() -> None:
-    root = project_root()
+    workspace = resolve_model_workspace()
+    root = workspace.root
     panel, experiment = load_dataset()
     market_panel = panel.copy()
-    data_source = experiment.get("data_source", active_data_source())
+    data_source = experiment.get("data_source", workspace.data_source)
     label_col = experiment["label_col"]
     panel[label_col] = pd.to_numeric(panel[label_col], errors="coerce")
     panel = panel.loc[np.isfinite(panel[label_col])].copy()
@@ -47,8 +51,7 @@ def run() -> None:
         feature_selection_config=experiment.get("feature_selection", {}),
     )
     if not feature_quality.empty:
-        feature_quality.to_csv(source_prefixed_path(reports_dir, "feature_quality.csv", data_source), index=False)
-        feature_quality.to_csv(reports_dir / "feature_quality.csv", index=False)
+        save_feature_quality_report(root, data_source=data_source, filename="feature_quality.csv", frame=feature_quality)
     logger.info(f"Selected {len(feature_columns)} features for LightGBM from {len(raw_feature_columns)} candidates.")
 
     def fit_model(x: pd.DataFrame, y: pd.Series) -> tuple[SimpleImputer, LGBMRegressor]:
@@ -119,31 +122,16 @@ def run() -> None:
         diagnostics = build_performance_diagnostics(daily_portfolio, label_col=label_col)
         metrics_by_split[split_name] = summary
 
-        scored.to_csv(source_prefixed_path(reports_dir, f"lgbm_{split_name}_predictions.csv", data_source), index=False)
-        daily_portfolio.to_csv(
-            source_prefixed_path(reports_dir, f"lgbm_{split_name}_portfolio.csv", data_source),
-            index=False,
+        save_model_split_reports(
+            root,
+            data_source=data_source,
+            model_name="lgbm",
+            split_name=split_name,
+            predictions=scored,
+            portfolio=daily_portfolio,
+            metrics=summary,
+            diagnostics=diagnostics,
         )
-        (
-            source_prefixed_path(reports_dir, f"lgbm_{split_name}_metrics.json", data_source)
-        ).write_text(
-            json.dumps(summary, indent=2),
-            encoding="utf-8",
-        )
-        scored.to_csv(reports_dir / f"lgbm_{split_name}_predictions.csv", index=False)
-        daily_portfolio.to_csv(reports_dir / f"lgbm_{split_name}_portfolio.csv", index=False)
-        (reports_dir / f"lgbm_{split_name}_metrics.json").write_text(
-            json.dumps(summary, indent=2),
-            encoding="utf-8",
-        )
-        for name, table in diagnostics.items():
-            if table.empty:
-                continue
-            table.to_csv(
-                source_prefixed_path(reports_dir, f"lgbm_{split_name}_{name}.csv", data_source),
-                index=False,
-            )
-            table.to_csv(reports_dir / f"lgbm_{split_name}_{name}.csv", index=False)
         logger.info(f"Saved LightGBM {split_name} reports to {reports_dir}")
 
     if importance_frames:
@@ -154,13 +142,12 @@ def run() -> None:
             .sort_values("importance_gain", ascending=False)
             .reset_index(drop=True)
         )
-        importance.to_csv(source_prefixed_path(reports_dir, "lgbm_feature_importance.csv", data_source), index=False)
-        importance.to_csv(reports_dir / "lgbm_feature_importance.csv", index=False)
+        save_feature_importance_report(root, data_source=data_source, model_name="lgbm", frame=importance)
 
-    from src.db.dashboard_sync import sync_dashboard_artifacts
+    from src.db.dashboard_sync import sync_watchlist_snapshot_artifact
 
-    summary = sync_dashboard_artifacts(root=root, data_source=data_source)
-    logger.info(summary.message if summary.ok else f"Dashboard DB sync failed: {summary.message}")
+    summary = sync_watchlist_snapshot_artifact(root=root, data_source=data_source)
+    logger.info(summary.message if summary.ok else f"Watchlist snapshot sync failed: {summary.message}")
 
     if metrics_by_split:
         save_stability_summary(

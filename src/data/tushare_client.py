@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 
 import pandas as pd
-import tushare as ts
 from dotenv import load_dotenv
 
 from src.utils.io import project_root
@@ -11,6 +10,8 @@ from src.utils.io import project_root
 
 class TushareClient:
     def __init__(self, token: str | None = None) -> None:
+        import tushare as ts
+
         load_dotenv(project_root() / ".env")
         resolved_token = token or os.getenv("TUSHARE_TOKEN")
         if not resolved_token:
@@ -34,27 +35,82 @@ class TushareClient:
     def trade_cal(self, start_date: str, end_date: str, exchange: str = "SSE"):
         return self.pro.trade_cal(exchange=exchange, start_date=start_date, end_date=end_date)
 
-    def daily(self, ts_code: str, start_date: str, end_date: str):
-        return self.pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+    def daily(
+        self,
+        ts_code: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        trade_date: str | None = None,
+    ):
+        query: dict[str, str] = {}
+        if ts_code:
+            query["ts_code"] = ts_code
+        if start_date:
+            query["start_date"] = start_date
+        if end_date:
+            query["end_date"] = end_date
+        if trade_date:
+            query["trade_date"] = trade_date
+        return self.pro.daily(**query)
 
-    def daily_basic(self, ts_code: str, start_date: str, end_date: str):
-        return self.pro.daily_basic(
-            ts_code=ts_code,
-            start_date=start_date,
-            end_date=end_date,
-            fields=(
-                "ts_code,trade_date,turnover_rate,volume_ratio,pe_ttm,pb,ps_ttm,total_mv,circ_mv"
-            ),
-        )
+    def daily_basic(
+        self,
+        ts_code: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        trade_date: str | None = None,
+    ):
+        query: dict[str, str] = {
+            "fields": "ts_code,trade_date,turnover_rate,volume_ratio,pe_ttm,pb,ps_ttm,total_mv,circ_mv",
+        }
+        if ts_code:
+            query["ts_code"] = ts_code
+        if start_date:
+            query["start_date"] = start_date
+        if end_date:
+            query["end_date"] = end_date
+        if trade_date:
+            query["trade_date"] = trade_date
+        return self.pro.daily_basic(**query)
 
-    def adj_factor(self, ts_code: str, start_date: str, end_date: str):
-        return self.pro.adj_factor(ts_code=ts_code, start_date=start_date, end_date=end_date)
+    def adj_factor(
+        self,
+        ts_code: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        trade_date: str | None = None,
+    ):
+        query: dict[str, str] = {}
+        if ts_code:
+            query["ts_code"] = ts_code
+        if start_date:
+            query["start_date"] = start_date
+        if end_date:
+            query["end_date"] = end_date
+        if trade_date:
+            query["trade_date"] = trade_date
+        return self.pro.adj_factor(**query)
 
     def index_weight(self, index_code: str, start_date: str, end_date: str):
         return self.pro.index_weight(index_code=index_code, start_date=start_date, end_date=end_date)
 
-    def stk_limit(self, ts_code: str, start_date: str, end_date: str):
-        return self.pro.stk_limit(ts_code=ts_code, start_date=start_date, end_date=end_date)
+    def stk_limit(
+        self,
+        ts_code: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        trade_date: str | None = None,
+    ):
+        query: dict[str, str] = {}
+        if ts_code:
+            query["ts_code"] = ts_code
+        if start_date:
+            query["start_date"] = start_date
+        if end_date:
+            query["end_date"] = end_date
+        if trade_date:
+            query["trade_date"] = trade_date
+        return self.pro.stk_limit(**query)
 
     def stock_st(self, ts_code: str, start_date: str, end_date: str):
         return self.pro.stock_st(ts_code=ts_code, start_date=start_date, end_date=end_date)

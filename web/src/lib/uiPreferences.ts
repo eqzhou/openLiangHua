@@ -121,11 +121,7 @@ export function resolveInitialTheme(storage: StorageLike | null = getBrowserStor
     return storedTheme
   }
 
-  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
-    return 'dark'
-  }
-
-  return 'light'
+  return 'dark'
 }
 
 export function writeThemeMode(theme: ThemeMode, storage: StorageLike | null = getBrowserStorage()) {

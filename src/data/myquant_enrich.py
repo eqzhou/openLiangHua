@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import json
 
 import akshare as ak
 import numpy as np
 import pandas as pd
 
+from src.app.repositories.report_repository import save_binary_dataset, save_json_report
 from src.data.myquant_panel import drop_trailing_empty_price_dates
 from src.utils.data_source import active_data_source, source_or_canonical_path
-from src.utils.io import ensure_dir, project_root, save_parquet
+from src.utils.io import ensure_dir, project_root
 from src.utils.logger import configure_logging
 
 logger = configure_logging()
@@ -182,13 +182,26 @@ def run(write_canonical: bool = False) -> None:
 
     cleaned_panel, limit_report = _clean_price_limits(panel)
     sw_history = _load_sw_industry_history(_build_symbol_lookup(cleaned_panel))
-    save_parquet(sw_history, staging_dir / "myquant_sw_industry_history.parquet")
+    save_binary_dataset(
+        root,
+        data_source="myquant",
+        directory="data/staging",
+        filename="sw_industry_history.parquet",
+        artifact_name="sw_industry_history",
+        frame=sw_history,
+        write_canonical=False,
+    )
 
     enriched_panel, industry_report = _merge_sw_history(cleaned_panel, sw_history)
-    save_parquet(enriched_panel, myquant_panel_path)
-
-    if write_canonical or active_data_source() == "myquant":
-        save_parquet(enriched_panel, staging_dir / "daily_bar.parquet")
+    save_binary_dataset(
+        root,
+        data_source="myquant",
+        directory="data/staging",
+        filename="daily_bar.parquet",
+        artifact_name="daily_bar",
+        frame=enriched_panel,
+        write_canonical=write_canonical or active_data_source() == "myquant",
+    )
 
     report = {
         "rows": int(len(enriched_panel)),
@@ -201,8 +214,13 @@ def run(write_canonical: bool = False) -> None:
         "industry_non_null_rows": int(enriched_panel["industry"].notna().sum()),
         "industry_source_sw_history_rows": int((enriched_panel["industry_source"] == "sw_history").sum()),
     }
-    report_path = staging_dir / "myquant_data_quality.json"
-    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    report_path = save_json_report(
+        root,
+        data_source="myquant",
+        filename="myquant_data_quality.json",
+        payload=report,
+        artifact_name="myquant_data_quality",
+    )
     logger.info(f"Saved MyQuant enrichment outputs to {staging_dir}")
     logger.info(report)
 
@@ -220,7 +238,9 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     run(write_canonical=args.write_canonical)
-    from src.db.dashboard_sync import sync_dashboard_artifacts
+    from src.db.dashboard_sync import sync_dataset_summary_artifact, sync_watchlist_snapshot_artifact
 
-    summary = sync_dashboard_artifacts()
-    logger.info(summary.message)
+    dataset_summary = sync_dataset_summary_artifact(data_source="myquant")
+    watchlist_summary = sync_watchlist_snapshot_artifact(data_source="myquant")
+    logger.info(dataset_summary.message)
+    logger.info(watchlist_summary.message)

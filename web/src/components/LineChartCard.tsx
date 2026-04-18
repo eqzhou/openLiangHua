@@ -39,7 +39,7 @@ export function LineChartCard({
   title,
   subtitle,
   actions,
-  emptyText = '暂无可展示曲线',
+  emptyText = '暂无曲线',
 }: LineChartCardProps) {
   const resolvedLineKeys = resolveLineKeys(data, xKey, lineKeys)
 

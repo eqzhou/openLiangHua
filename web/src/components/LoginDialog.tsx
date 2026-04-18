@@ -8,7 +8,7 @@ interface LoginDialogProps {
 }
 
 export function LoginDialog({ open, pending = false, onClose, onSubmit }: LoginDialogProps) {
-  const [username, setUsername] = useState('')
+  const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
 
   useEffect(() => {
@@ -39,7 +39,10 @@ export function LoginDialog({ open, pending = false, onClose, onSubmit }: LoginD
             <h2 id="login-dialog-title" className="modal-card__title">
               登录
             </h2>
-            <p className="modal-card__subtitle">使用研究工作台账号登录,写操作会通过数据库会话做鉴权。</p>
+            <p className="modal-card__subtitle">使用工作台账号登录，写操作会通过数据库会话做鉴权。</p>
+            <p className="modal-card__subtitle">
+              本地开发默认用户名是 <code>admin</code>；密码如果不确定，请查看根目录 <code>.env</code> 里的 <code>APP_BOOTSTRAP_PASSWORD</code>。
+            </p>
           </div>
           <button type="button" className="modal-card__close" onClick={onClose} aria-label="关闭登录窗口" disabled={pending}>
             ×

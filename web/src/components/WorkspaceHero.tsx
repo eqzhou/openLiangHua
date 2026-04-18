@@ -7,11 +7,12 @@ interface WorkspaceHeroProps {
   badges?: ReactNode
   controls?: ReactNode
   summary?: ReactNode
+  className?: string
 }
 
-export function WorkspaceHero({ eyebrow, title, description, badges, controls, summary }: WorkspaceHeroProps) {
+export function WorkspaceHero({ eyebrow, title, description, badges, controls, summary, className }: WorkspaceHeroProps) {
   return (
-    <header className="workspace-hero">
+    <header className={['workspace-hero', className].filter(Boolean).join(' ')}>
       <div className="workspace-hero__intro">
         {eyebrow ? <p className="workspace-hero__eyebrow">{eyebrow}</p> : null}
         <div className="workspace-hero__row">

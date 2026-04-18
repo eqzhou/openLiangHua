@@ -23,13 +23,14 @@ interface SpotlightCardProps {
   metrics?: SpotlightMetric[]
   actions?: ReactNode
   children?: ReactNode
+  className?: string
 }
 
-export function SpotlightCard({ title, subtitle, meta, badges = [], metrics = [], actions, children }: SpotlightCardProps) {
+export function SpotlightCard({ title, subtitle, meta, badges = [], metrics = [], actions, children, className }: SpotlightCardProps) {
   const visibleBadges = badges.filter((item) => item.label)
 
   return (
-    <div className="spotlight-card">
+    <div className={['spotlight-card', className].filter(Boolean).join(' ')}>
       <div className="headline-row">
         <div>
           <h3 className="headline-title">

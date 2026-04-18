@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from src.app.repositories.report_repository import save_binary_dataset
 from src.data.akshare_client import AKShareClient
 from src.data.universe import load_universe
 from src.utils.io import ensure_dir, project_root, save_parquet
@@ -332,8 +333,22 @@ def run(
     if not snapshot.empty:
         metadata = metadata.merge(snapshot, on="ts_code", how="left")
 
-    save_parquet(calendar, output_dir / "trade_calendar.parquet")
-    save_parquet(metadata.sort_values("ts_code").reset_index(drop=True), output_dir / "stock_basic.parquet")
+    save_binary_dataset(
+        root,
+        data_source="akshare",
+        directory="data/staging",
+        filename="trade_calendar.parquet",
+        artifact_name="trade_calendar",
+        frame=calendar,
+    )
+    save_binary_dataset(
+        root,
+        data_source="akshare",
+        directory="data/staging",
+        filename="stock_basic.parquet",
+        artifact_name="stock_basic",
+        frame=metadata.sort_values("ts_code").reset_index(drop=True),
+    )
     if not index_membership_raw.empty:
         save_parquet(index_membership_raw, output_dir / "index_membership_raw.parquet")
         save_parquet(index_membership_daily, output_dir / "index_membership_daily.parquet")
@@ -394,7 +409,14 @@ def run(
         daily_bar["index_weight"] = np.nan
         daily_bar["is_index_member"] = True
 
-    save_parquet(daily_bar, output_dir / "daily_bar.parquet")
+    save_binary_dataset(
+        root,
+        data_source="akshare",
+        directory="data/staging",
+        filename="daily_bar.parquet",
+        artifact_name="daily_bar",
+        frame=daily_bar,
+    )
     logger.info(f"Saved AKShare market panel to {output_dir / 'daily_bar.parquet'}")
 
 
@@ -423,7 +445,9 @@ if __name__ == "__main__":
         symbol_limit=args.symbol_limit,
         skip_existing=not args.refresh_existing,
     )
-    from src.db.dashboard_sync import sync_dashboard_artifacts
+    from src.db.dashboard_sync import sync_dataset_summary_artifact, sync_watchlist_snapshot_artifact
 
-    summary = sync_dashboard_artifacts()
-    logger.info(summary.message)
+    dataset_summary = sync_dataset_summary_artifact(data_source="akshare")
+    watchlist_summary = sync_watchlist_snapshot_artifact(data_source="akshare")
+    logger.info(dataset_summary.message)
+    logger.info(watchlist_summary.message)

@@ -272,6 +272,12 @@ class AppLayerTests(unittest.TestCase):
         focus_row = watchlist_view.loc[watchlist_view["ts_code"] == "000001.SZ"].iloc[0]
         self.assertEqual(holding_row["entry_group"], "持仓")
         self.assertEqual(focus_row["entry_group"], "重点关注")
+        self.assertEqual(str(holding_row["source_category"]), "手动持有")
+        self.assertEqual(str(focus_row["source_category"]), "手动关注")
+        self.assertIn("手动持有", str(holding_row["source_tags"]))
+        self.assertIn("历史AI精选", str(holding_row["source_tags"]))
+        self.assertIn("最新推理入池", str(holding_row["source_tags"]))
+        self.assertIn("手动关注", str(focus_row["source_tags"]))
         self.assertTrue(bool(focus_row["is_watch_only"]))
         self.assertEqual(str(focus_row["focus_note"]), "Focus for breakout follow-up.")
         self.assertEqual(holding_row["ts_code"], "000078.SZ")

@@ -1,26 +1,68 @@
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { apiGet } from '../api/client'
+import { apiGet, apiPost } from '../api/client'
 import { Badge } from '../components/Badge'
 import { DataTable } from '../components/DataTable'
+import { MetricCard } from '../components/MetricCard'
 import { Panel } from '../components/Panel'
 import { PropertyGrid } from '../components/PropertyGrid'
 import { QueryNotice } from '../components/QueryNotice'
+import { RealtimeStatusBanner } from '../components/RealtimeStatusBanner'
 import { SectionBlock } from '../components/SectionBlock'
 import { SpotlightCard } from '../components/SpotlightCard'
 import { SupportPanel } from '../components/SupportPanel'
-import { servicePageClient } from '../facades/dashboardPageClient'
+import { useToast } from '../components/ToastProvider'
+import { WorkspaceHero } from '../components/WorkspaceHero'
+import { realtimeRefreshClient, servicePageClient } from '../facades/dashboardPageClient'
 import { formatDateTime, formatValue, recordToFieldRows } from '../lib/format'
 import { describeRealtimeSnapshotMode, describeRealtimeSource, formatRealtimeCoverage, normalizeRealtimeFailedSymbols } from '../lib/realtime'
-import type { JsonRecord, ServicePayload } from '../types/api'
+import type { JsonRecord, RealtimeRefreshPayload, ServicePayload } from '../types/api'
 
 const FIELD_COLUMNS = ['field', 'value']
 
-export function ServicePage() {
+interface ServicePageProps {
+  authenticated?: boolean
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim()
+  }
+  return '操作失败，请稍后再试。'
+}
+
+export function ServicePage({ authenticated = false }: ServicePageProps) {
+  const queryClient = useQueryClient()
+  const { pushToast } = useToast()
   const serviceQuery = useQuery({
     queryKey: servicePageClient.queryKey(),
     queryFn: () => apiGet<ServicePayload>(servicePageClient.path()),
+    refetchInterval: 15_000,
+  })
+
+  const refreshRealtimeMutation = useMutation({
+    mutationFn: () => apiPost<RealtimeRefreshPayload>(realtimeRefreshClient.path()),
+    onSuccess: (payload) => {
+      void queryClient.invalidateQueries()
+      const realtime = payload.realtimeStatus ?? {}
+      const successCount = Number(realtime.success_symbol_count ?? 0)
+      const requestedCount = Number(realtime.requested_symbol_count ?? 0)
+      const sourceLabel = describeRealtimeSource(realtime.source).label
+      const snapshotLabel = String(realtime.snapshot_label_display ?? '最新行情')
+      pushToast({
+        tone: successCount > 0 ? 'success' : 'error',
+        title: '实时快照已更新',
+        description: `${snapshotLabel}，覆盖 ${successCount} / ${requestedCount}，来源 ${sourceLabel}，更新时间 ${formatDateTime(realtime.fetched_at)}。`,
+      })
+    },
+    onError: (error) => {
+      pushToast({
+        tone: 'error',
+        title: '实时快照更新失败',
+        description: toErrorMessage(error),
+      })
+    },
   })
 
   const payload = useMemo(() => serviceQuery.data ?? {}, [serviceQuery.data])
@@ -47,27 +89,44 @@ export function ServicePage() {
     return recordToFieldRows(filtered)
   }, [payload])
 
+  const serviceHeroBadges = (
+    <>
+      <Badge tone={statusTone}>{`服务 ${String(payload.status_label_display ?? '未知')}`}</Badge>
+      <Badge tone={payload.listener_present ? 'good' : 'warn'}>{payload.listener_present ? '监听正常' : '监听异常'}</Badge>
+      <Badge tone={snapshotTone}>{String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}</Badge>
+      <Badge tone="brand">{snapshotSource.label}</Badge>
+    </>
+  )
+
   return (
     <div className="page-stack">
-      <Panel
-        title="页面服务"
-        subtitle="先看健康与快照，再决定是否排查。"
-        tone="warm"
-        className="panel--summary-surface"
-      >
-        <QueryNotice isLoading={serviceQuery.isLoading} error={serviceQuery.error} />
+      <WorkspaceHero
+        title="服务"
+        badges={serviceHeroBadges}
+      />
 
-        <SectionBlock title="运行结论" description="首屏只保留服务健康、快照状态和最近更新时间。">
+      <div className="metric-grid metric-grid--four">
+        <MetricCard label="页面进程 PID" value={payload.streamlit_pid ?? '-'} />
+        <MetricCard label="守护进程 PID" value={payload.supervisor_pid ?? '-'} />
+        <MetricCard label="监听端口数" value={(payload.listener_pids as unknown[] | undefined)?.length ?? 0} tone={payload.listener_present ? 'good' : 'warn'} />
+        <MetricCard label="重启次数" value={lastStatus.restart_count ?? '-'} tone={Number(lastStatus.restart_count ?? 0) > 0 ? 'warn' : 'default'} />
+      </div>
+
+      <Panel title="状态" tone="warm" className="panel--summary-surface">
+        <QueryNotice isLoading={serviceQuery.isLoading} error={serviceQuery.error} />
+        {!authenticated ? <div className="query-notice query-notice--info">当前只读，可查看最近快照；如需刷新行情，请先登录。</div> : null}
+
+        <SectionBlock title="运行结论">
           <SpotlightCard
             title={String(payload.status_label_display ?? '未知')}
             meta="前端服务状态"
             subtitle={`最近更新时间 ${formatDateTime(lastStatus.last_update)}，快照状态 ${String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}。`}
             badges={[
               { label: `服务 ${String(payload.status_label_display ?? '未知')}`, tone: statusTone },
-              { label: payload.listener_present ? '8501 已监听' : '8501 未监听', tone: payload.listener_present ? 'good' : 'warn' },
+              { label: payload.listener_present ? '8501 正常' : '8501 异常', tone: payload.listener_present ? 'good' : 'warn' },
               { label: String(realtimeSnapshot.snapshot_label_display ?? '暂无快照'), tone: snapshotTone },
               {
-                label: payload.listener_matches_streamlit_pid ? '监听与页面进程一致' : '监听与页面进程不一致',
+                label: payload.listener_matches_streamlit_pid ? '进程一致' : '进程异常',
                 tone: payload.listener_matches_streamlit_pid ? 'good' : 'warn',
               },
             ]}
@@ -79,15 +138,27 @@ export function ServicePage() {
             ]}
           />
         </SectionBlock>
+
+        <SectionBlock title="盘中快照刷新">
+          <RealtimeStatusBanner
+            title="实时快照刷新"
+            status={realtimeSnapshot}
+            isRefreshing={refreshRealtimeMutation.isPending}
+            error={refreshRealtimeMutation.isError ? refreshRealtimeMutation.error : undefined}
+            onRefresh={() => refreshRealtimeMutation.mutate()}
+            onRetryFailed={() => refreshRealtimeMutation.mutate()}
+            disabled={!authenticated || refreshRealtimeMutation.isPending}
+          />
+        </SectionBlock>
       </Panel>
 
-      <Panel title="关键状态字段" subtitle="状态总表前置，日志和支持解释后置。" tone="calm" className="panel--table-surface">
-        <DataTable rows={serviceFieldRows} columns={FIELD_COLUMNS} storageKey="service-fields" emptyText="暂无服务状态" stickyFirstColumn />
+      <Panel title="字段" tone="calm" className="panel--table-surface">
+        <DataTable rows={serviceFieldRows} columns={FIELD_COLUMNS} storageKey="service-fields" emptyText="暂无状态" stickyFirstColumn />
       </Panel>
 
       <div className="split-layout">
-        <SupportPanel title="快照支持" subtitle="快照解释统一后置。">
-          <SectionBlock title="快照摘要" description="这里只保留支持性上下文。" tone="muted" collapsible defaultExpanded={false}>
+        <SupportPanel title="快照">
+          <SectionBlock title="快照概览" tone="muted" collapsible defaultExpanded={false}>
             <div className="badge-row">
               <Badge tone={snapshotTone}>{String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}</Badge>
               <Badge tone="brand">{snapshotSource.label}</Badge>
@@ -97,18 +168,18 @@ export function ServicePage() {
               items={[
                 { label: '交易日期', value: formatValue(realtimeSnapshot.trade_date) },
                 { label: '抓取时间', value: formatDateTime(realtimeSnapshot.fetched_at) },
-                { label: '数据入口', value: formatValue(realtimeSnapshot.served_from) },
-                { label: '快照模式', value: snapshotMode.label },
+                { label: '数据来源', value: formatValue(realtimeSnapshot.served_from) },
+                { label: '快照状态', value: snapshotMode.label },
                 { label: '是否当天', value: formatValue(realtimeSnapshot.is_today), tone: realtimeSnapshot.is_today ? 'good' : 'default' },
                 {
                   label: '失败股票',
-                  value: snapshotFailedSymbols.length ? snapshotFailedSymbols.join(' / ') : '无',
+                  value: snapshotFailedSymbols.length ? snapshotFailedSymbols.join(' / ') : '暂无',
                   span: 'double',
                   tone: snapshotFailedSymbols.length ? 'warn' : 'good',
                 },
                 {
                   label: '最近错误',
-                  value: formatValue(realtimeSnapshot.error_message) === '-' ? '无' : formatValue(realtimeSnapshot.error_message),
+                  value: formatValue(realtimeSnapshot.error_message) === '-' ? '暂无' : formatValue(realtimeSnapshot.error_message),
                   span: 'double',
                   tone: formatValue(realtimeSnapshot.error_message) === '-' ? 'default' : 'warn',
                 },
@@ -117,17 +188,17 @@ export function ServicePage() {
           </SectionBlock>
         </SupportPanel>
 
-        <SupportPanel title="运行支持" subtitle="文件陈旧、端口一致性和最近状态后置。">
-          <SectionBlock title="健康检查补充" description="需要排查时再看这些细节字段。" tone="muted" collapsible defaultExpanded={false}>
+        <SupportPanel title="运行">
+          <SectionBlock title="健康检查概览" tone="muted" collapsible defaultExpanded={false}>
             <PropertyGrid
               items={[
-                { label: '守护进程运行中', value: formatValue(payload.supervisor_running) },
-                { label: '页面进程运行中', value: formatValue(payload.streamlit_running) },
+                { label: '守护进程状态', value: formatValue(payload.supervisor_running) },
+                { label: '页面进程状态', value: formatValue(payload.streamlit_running) },
                 { label: '监听端口', value: formatValue(payload.listener_pids), span: 'double' },
                 { label: '状态文件陈旧', value: formatValue(payload.stale_status), tone: payload.stale_status ? 'warn' : 'good' },
                 { label: '守护 PID 陈旧', value: formatValue(payload.stale_supervisor_pid), tone: payload.stale_supervisor_pid ? 'warn' : 'good' },
                 { label: '页面 PID 陈旧', value: formatValue(payload.stale_streamlit_pid), tone: payload.stale_streamlit_pid ? 'warn' : 'good' },
-                { label: '最近状态', value: formatValue(lastStatus.state) },
+                { label: '服务状态', value: formatValue(lastStatus.state) },
                 { label: '最近更新时间', value: formatDateTime(lastStatus.last_update) },
               ]}
             />
@@ -135,13 +206,13 @@ export function ServicePage() {
         </SupportPanel>
       </div>
 
-      <SupportPanel title="运行日志" subtitle="日志后置，只在排查时展开。">
+      <SupportPanel title="日志">
         <div className="split-layout">
-          <SectionBlock title="标准输出" description="最近一次启动和运行输出。" tone="muted" collapsible defaultExpanded={false}>
-            <pre className="log-block">{String(payload.out_log_tail ?? '') || '暂无内容'}</pre>
+          <SectionBlock title="标准输出" tone="muted" collapsible defaultExpanded={false}>
+            <pre className="log-block">{String(payload.out_log_tail ?? '') || '暂无日志'}</pre>
           </SectionBlock>
-          <SectionBlock title="错误输出" description="最近异常和错误栈信息。" tone="muted" collapsible defaultExpanded={false}>
-            <pre className="log-block">{String(payload.err_log_tail ?? '') || '暂无内容'}</pre>
+          <SectionBlock title="错误输出" tone="muted" collapsible defaultExpanded={false}>
+            <pre className="log-block">{String(payload.err_log_tail ?? '') || '暂无日志'}</pre>
           </SectionBlock>
         </div>
       </SupportPanel>

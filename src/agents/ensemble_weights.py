@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from src.app.repositories.report_repository import (
+    load_metrics as repo_load_metrics,
+    load_stability as repo_load_stability,
+)
 from src.utils.data_source import source_or_canonical_path
 
 
@@ -26,10 +30,31 @@ def _load_json(path: Path) -> dict[str, object]:
 
 
 def _load_metrics(reports_dir: Path, model_name: str, data_source: str, split_name: str) -> dict[str, object]:
+    root = reports_dir.parent.parent if reports_dir.name == "weekly" and reports_dir.parent.name == "reports" else None
+    if root is not None:
+        payload = repo_load_metrics(
+            root,
+            data_source=data_source,
+            model_name=model_name,
+            split_name=split_name,
+            prefer_database=True,
+        )
+        if payload:
+            return payload
     return _load_json(source_or_canonical_path(reports_dir, f"{model_name}_{split_name}_metrics.json", data_source))
 
 
 def _load_stability(reports_dir: Path, model_name: str, data_source: str) -> dict[str, object]:
+    root = reports_dir.parent.parent if reports_dir.name == "weekly" and reports_dir.parent.name == "reports" else None
+    if root is not None:
+        payload = repo_load_stability(
+            root,
+            data_source=data_source,
+            model_name=model_name,
+            prefer_database=True,
+        )
+        if payload:
+            return payload
     return _load_json(source_or_canonical_path(reports_dir, f"{model_name}_stability.json", data_source))
 
 

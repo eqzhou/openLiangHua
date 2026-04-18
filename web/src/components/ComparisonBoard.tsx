@@ -19,7 +19,7 @@ interface ComparisonBoardProps {
   emptyText?: string
 }
 
-export function ComparisonBoard({ columns, rows, emptyText = '暂无可比较数据' }: ComparisonBoardProps) {
+export function ComparisonBoard({ columns, rows, emptyText = '暂无数据' }: ComparisonBoardProps) {
   if (!columns.length || !rows.length) {
     return <div className="empty-state">{emptyText}</div>
   }

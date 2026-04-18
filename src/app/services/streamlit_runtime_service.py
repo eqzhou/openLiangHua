@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
 
+from src.app.repositories.runtime_repository import read_streamlit_status_payload
 from src.utils.io import project_root
 
 
@@ -35,34 +34,22 @@ def get_streamlit_service_status(root: Path | None = None) -> dict[str, object]:
         "out_log_tail": "",
         "err_log_tail": "",
     }
-    if not status_script_path.exists():
+    payload, error_code, error_detail = read_streamlit_status_payload(resolved_root)
+    if error_code == "missing_script":
         return status
-
-    result = subprocess.run(
-        [
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(status_script_path),
-        ],
-        cwd=str(resolved_root),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
+    if error_code == "missing_powershell":
+        status["status_label"] = "状态脚本不可用"
+        status["status_label_display"] = "状态脚本不可用"
+        status["err_log_tail"] = error_detail or ""
+        return status
+    if error_code == "script_failed":
         status["status_label"] = "状态脚本失败"
-        if result.stderr:
-            status["err_log_tail"] = result.stderr.strip()
+        if error_detail:
+            status["err_log_tail"] = error_detail
         return status
-
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
+    if error_code == "parse_failed" or payload is None:
         status["status_label"] = "状态解析失败"
-        status["err_log_tail"] = result.stdout.strip()[-2000:]
+        status["err_log_tail"] = error_detail or ""
         return status
 
     status.update(payload)

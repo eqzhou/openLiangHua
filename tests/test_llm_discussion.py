@@ -5,6 +5,7 @@ import shutil
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import yaml
@@ -110,6 +111,43 @@ class LlmDiscussionSnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["selected_round_count"], 0)
         self.assertEqual(snapshot["latest_status"], "仅在候选池")
         self.assertIn("未进入前 1 名自动研讨名单", snapshot["latest_summary"])
+
+    def test_load_symbol_discussion_snapshot_prefers_repository_backed_artifacts(self) -> None:
+        with (
+            patch(
+                "src.utils.llm_discussion.load_overlay_inference_packet",
+                return_value={
+                    "latest_date": "2026-04-01",
+                    "top_n": 5,
+                    "selected_candidates": [{"ts_code": "000078.SZ", "thesis_summary": "仓位更适合观察。"}],
+                    "llm_bridge": {"execution_status": "executed"},
+                },
+            ),
+            patch(
+                "src.utils.llm_discussion.load_overlay_inference_candidates",
+                return_value=pd.DataFrame([{"ts_code": "000078.SZ"}]),
+            ),
+            patch(
+                "src.utils.llm_discussion.load_overlay_llm_bundle",
+                return_value={
+                    "response_lookup": {
+                        "000078.SZ": {
+                            "custom_id": "000078.SZ",
+                            "status": "success",
+                            "output_text": "数据库里的研讨结论提到 3.45 一线承接。",
+                        }
+                    },
+                    "response_summary": "数据库摘要",
+                },
+            ),
+            patch("src.utils.llm_discussion.load_overlay_packet", return_value={}),
+            patch("src.utils.llm_discussion.load_overlay_candidates", return_value=pd.DataFrame()),
+        ):
+            snapshot = load_symbol_discussion_snapshot(self.case_root, "myquant", "000078.SZ")
+
+        self.assertEqual(snapshot["round_count"], 1)
+        self.assertEqual(snapshot["success_round_count"], 1)
+        self.assertIn("3.45", snapshot["latest_summary"])
 
 
 if __name__ == "__main__":

@@ -267,6 +267,17 @@ export const servicePageClient = {
   path: (): string => '/api/service',
 }
 
+export const dataManagementClient = {
+  queryKey: (): QueryKey => ['data-management'],
+  path: (): string => '/api/data-management',
+  incrementalActionPath: (): string => '/api/data-management/tushare-refresh',
+  fullRefreshActionPath: (): string => '/api/data-management/full-refresh',
+}
+
+export const realtimeRefreshClient = {
+  path: (): string => '/api/realtime/refresh',
+}
+
 export const homePageClient = {
   queryKey: (): QueryKey => ['home-page'],
   path: (): string => '/api/home',

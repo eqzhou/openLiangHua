@@ -123,6 +123,22 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("effective_state", payload)
         self.assertIn("realtime_snapshot", payload)
 
+    def test_data_management_endpoint_returns_status_shape(self) -> None:
+        response = self.client.get("/api/data-management")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("targetSource", payload)
+        self.assertIn("dailyBar", payload)
+        self.assertIn("featurePanel", payload)
+        self.assertIn("labelPanel", payload)
+        self.assertIn("tokenConfigured", payload)
+
+    def test_data_management_refresh_endpoint_requires_auth(self) -> None:
+        response = self.client.post("/api/data-management/tushare-refresh", json={"target_source": "akshare"})
+
+        self.assertEqual(response.status_code, 401)
+
 
 if __name__ == "__main__":
     unittest.main()

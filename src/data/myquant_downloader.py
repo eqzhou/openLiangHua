@@ -8,11 +8,12 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from src.app.repositories.report_repository import save_binary_dataset
 from src.data.index_membership import expand_index_membership
 from src.data.myquant_client import MyQuantClient
 from src.data.myquant_panel import drop_trailing_empty_price_dates, trim_open_dates_to_bars
 from src.data.universe import load_universe
-from src.utils.io import ensure_dir, project_root, save_parquet
+from src.utils.io import ensure_dir, project_root
 from src.utils.logger import configure_logging
 
 logger = configure_logging()
@@ -325,10 +326,16 @@ def _build_symbol_panel(
     return merged[keep_cols].sort_values(["trade_date", "ts_code"]).reset_index(drop=True)
 
 
-def _save_with_prefix(frame: pd.DataFrame, output_dir: Path, filename: str, write_canonical: bool = False) -> None:
-    save_parquet(frame, output_dir / f"myquant_{filename}")
-    if write_canonical:
-        save_parquet(frame, output_dir / filename)
+def _save_with_prefix(root: Path, frame: pd.DataFrame, filename: str, artifact_name: str, write_canonical: bool = False) -> None:
+    save_binary_dataset(
+        root,
+        data_source="myquant",
+        directory="data/staging",
+        filename=filename,
+        artifact_name=artifact_name,
+        frame=frame,
+        write_canonical=write_canonical,
+    )
 
 
 def run(
@@ -414,15 +421,15 @@ def run(
             ", ".join(str(date.date()) for date in trailing_empty_dates),
         )
 
-    _save_with_prefix(calendar, output_dir, "trade_calendar.parquet", write_canonical=write_canonical)
-    _save_with_prefix(metadata, output_dir, "stock_basic.parquet", write_canonical=write_canonical)
-    _save_with_prefix(static_meta_raw, output_dir, "instrument_infos.parquet")
-    _save_with_prefix(daily_meta, output_dir, "instrument_history.parquet")
-    _save_with_prefix(bars, output_dir, "bars_raw.parquet")
+    _save_with_prefix(root, calendar, "trade_calendar.parquet", "trade_calendar", write_canonical=write_canonical)
+    _save_with_prefix(root, metadata, "stock_basic.parquet", "stock_basic", write_canonical=write_canonical)
+    _save_with_prefix(root, static_meta_raw, "instrument_infos.parquet", "instrument_infos")
+    _save_with_prefix(root, daily_meta, "instrument_history.parquet", "instrument_history")
+    _save_with_prefix(root, bars, "bars_raw.parquet", "bars_raw")
     if not membership_raw.empty:
-        _save_with_prefix(membership_raw, output_dir, "index_membership_raw.parquet", write_canonical=write_canonical)
-        _save_with_prefix(membership_daily, output_dir, "index_membership_daily.parquet", write_canonical=write_canonical)
-    _save_with_prefix(daily_bar, output_dir, "daily_bar.parquet", write_canonical=write_canonical)
+        _save_with_prefix(root, membership_raw, "index_membership_raw.parquet", "index_membership_raw", write_canonical=write_canonical)
+        _save_with_prefix(root, membership_daily, "index_membership_daily.parquet", "index_membership_daily", write_canonical=write_canonical)
+    _save_with_prefix(root, daily_bar, "daily_bar.parquet", "daily_bar", write_canonical=write_canonical)
 
     logger.info(f"MyQuant daily bar rows: {len(daily_bar):,}")
     logger.info(f"MyQuant symbols: {daily_bar['ts_code'].nunique():,}")
@@ -450,7 +457,9 @@ if __name__ == "__main__":
         chunk_size=max(1, args.chunk_size),
         write_canonical=args.write_canonical,
     )
-    from src.db.dashboard_sync import sync_dashboard_artifacts
+    from src.db.dashboard_sync import sync_dataset_summary_artifact, sync_watchlist_snapshot_artifact
 
-    summary = sync_dashboard_artifacts()
-    logger.info(summary.message)
+    dataset_summary = sync_dataset_summary_artifact(data_source="myquant")
+    watchlist_summary = sync_watchlist_snapshot_artifact(data_source="myquant")
+    logger.info(dataset_summary.message)
+    logger.info(watchlist_summary.message)

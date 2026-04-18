@@ -221,6 +221,54 @@ Notes:
 - The MyQuant token used in this project does not have the dedicated industry API permission, so point-in-time industry is currently enriched from AkShare's SW history plus local fallback.
 - This keeps the research schema aligned with `daily_bar.parquet`, which makes later model switching easier.
 
+## Optional Tushare Incremental Refresh
+
+If your local `daily_bar.parquet` (or source-prefixed variant such as `akshare_daily_bar.parquet`) already exists and you only want to append missing trading days without rewriting old rows, you can use the Tushare incremental helper.
+
+1. Fill `TUSHARE_TOKEN` in `.env`.
+2. Copy `.env.example` to `.env` if you have not created it yet.
+3. Run the daily refresh script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\refresh_daily_bar_tushare.ps1 -TargetSource akshare -EndDate 2026-04-16
+```
+
+On macOS / Linux, you can run:
+
+```bash
+bash ./scripts/refresh_daily_bar_tushare.sh akshare 2026-04-16
+```
+
+Or call the module directly:
+
+```powershell
+python -m src.data.tushare_incremental_sync --target-source akshare --end-date 2026-04-16 --write-canonical
+```
+
+Notes:
+
+- `.env` is gitignored, so this is the right place to keep a frequently rotated `TUSHARE_TOKEN`.
+- This helper only appends missing trade dates for the symbols already tracked in the local panel plus current `watch_symbols`.
+- Existing historical rows are kept as-is; the command does not backfill or rewrite old dates.
+- It updates the matching `trade_calendar` and `stock_basic` staging files alongside `daily_bar`.
+
+If you want to refresh daily bars and then continue through `特征 / 标签 / Dashboard 快照` in one shot, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\refresh_full_pipeline_tushare.ps1 -TargetSource akshare -EndDate 2026-04-16
+```
+
+macOS / Linux:
+
+```bash
+bash ./scripts/refresh_full_pipeline_tushare.sh akshare 2026-04-16
+```
+
+The React workbench now also includes a dedicated `数据管理` page for the same two actions:
+
+- `Tushare 增量刷新日线`
+- `Tushare 全流程刷新`
+
 ## Outputs
 
 - `data/staging/daily_bar.parquet`: merged market panel from AKShare

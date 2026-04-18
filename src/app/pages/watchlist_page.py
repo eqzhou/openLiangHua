@@ -296,19 +296,7 @@ def render_watchlist_page(
         discussion_rows = discussion_round_rows(discussion_snapshot)
         if discussion_rows:
             st.dataframe(pd.DataFrame(discussion_rows), width="stretch")
-        for round_info in discussion_snapshot.get("rounds", []) or []:
-            title = (
-                f"{round_info.get('round_label', '-')}"
-                f" | {round_info.get('latest_date', '-')}"
-                f" | {round_info.get('display_status', '-')}"
-            )
-            with st.expander(title, expanded=False):
-                summary_text = str(round_info.get("summary_text", "") or "").strip()
-                if summary_text:
-                    st.write(summary_text)
-                thesis_summary = str(round_info.get("thesis_summary", "") or "").strip()
-                if thesis_summary and thesis_summary != summary_text:
-                    st.caption(f"系统内结论：{thesis_summary}")
+            st.caption("界面仅展示各轮摘要，不再展开逐轮对话原文。")
 
     action_cols = st.columns(2)
     if action_cols[0].button("生成最新盯盘清单", key=f"generate_watch_plan_{inspect_symbol}", width="stretch"):
@@ -569,6 +557,7 @@ def render_watchlist_payload_page(
     if not discussion_rows.empty:
         st.markdown("**多轮 AI 研讨回写**")
         st.dataframe(discussion_rows, width="stretch")
+        st.caption("界面仅展示各轮摘要，不再展开逐轮对话原文。")
 
     action_cols = st.columns(2)
     if action_cols[0].button("生成最新盯盘清单", key=f"generate_watch_plan_{selected_symbol}", width="stretch"):

@@ -428,6 +428,7 @@ export function DataTable({
 
   const tableWrapClassName = ['table-wrap', stickyFirstColumn ? 'table-wrap--sticky-first' : ''].filter(Boolean).join(' ')
   const tableClassName = ['data-table', `data-table--${density}`, onRowClick ? 'data-table--interactive' : ''].join(' ')
+  const primaryColumn = safeColumns[0]
 
   return (
     <section className="table-shell" role="region" aria-live="polite" aria-busy={loading}>
@@ -435,7 +436,7 @@ export function DataTable({
         <div className="table-toolbar__summary" aria-label="表格摘要">
           <div className="table-toolbar__meta">
             <span className="table-toolbar__chip">共 {sortedRows.length} 行</span>
-            {activePreset ? <span className="table-toolbar__chip table-toolbar__chip--active">当前视图 {activePreset.label}</span> : null}
+            {activePreset ? <span className="table-toolbar__chip table-toolbar__chip--active">当前预设 {activePreset.label}</span> : null}
             {enableColumnManager && resolvedColumns.length > 1 ? (
               <span className="table-toolbar__chip table-toolbar__chip--secondary">显示 {safeColumns.length}/{resolvedColumns.length} 列</span>
             ) : null}
@@ -444,7 +445,7 @@ export function DataTable({
 
         <div className="table-toolbar__controls">
           {normalizedPresets.length ? (
-            <div className="table-toolbar__presets" role="group" aria-label="切换表格视图">
+            <div className="table-toolbar__presets" role="group" aria-label="切换表格预设">
               {normalizedPresets.map((preset) => (
                 <button
                   key={preset.key}
@@ -600,7 +601,7 @@ export function DataTable({
           </thead>
           <tbody>
             {sortedRows.map((row, index) => {
-              const rowId = getRowId?.(row, index) ?? `${index}-${String(row[safeColumns[0]] ?? index)}`
+              const rowId = getRowId?.(row, index) ?? `${index}-${String(row[primaryColumn] ?? index)}`
               const isSelected = selectedRowId !== null && rowId === selectedRowId
 
               return (
@@ -628,6 +629,39 @@ export function DataTable({
             })}
           </tbody>
         </table>
+      </div>
+
+      <div className="table-mobile-list">
+        {sortedRows.map((row, index) => {
+          const rowId = getRowId?.(row, index) ?? `${index}-${String(row[primaryColumn] ?? index)}`
+          const isSelected = selectedRowId !== null && rowId === selectedRowId
+
+          return (
+            <article
+              key={rowId}
+              className={`table-mobile-card${isSelected ? ' table-mobile-card--selected' : ''}${onRowClick ? ' table-mobile-card--interactive' : ''}`}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+            >
+              <div className="table-mobile-card__primary">
+                <span className="table-mobile-card__eyebrow">{getFieldLabel(primaryColumn, columnLabels)}</span>
+                <div className="table-mobile-card__primary-value">
+                  {cellRenderers?.[primaryColumn]
+                    ? cellRenderers[primaryColumn](row, primaryColumn)
+                    : formatCellValue(primaryColumn, row[primaryColumn])}
+                </div>
+              </div>
+
+              <dl className="table-mobile-card__fields">
+                {safeColumns.slice(1).map((column) => (
+                  <div key={column} className="table-mobile-card__field">
+                    <dt>{getFieldLabel(column, columnLabels)}</dt>
+                    <dd>{cellRenderers?.[column] ? cellRenderers[column](row, column) : formatCellValue(column, row[column])}</dd>
+                  </div>
+                ))}
+              </dl>
+            </article>
+          )
+        })}
       </div>
     </section>
   )

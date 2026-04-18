@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import json
 from pathlib import Path
 
 import numpy as np
@@ -10,8 +8,16 @@ import pyarrow.parquet as pq
 from src.agents.ensemble_weights import resolve_model_weights
 from src.agents.llm_bridge import export_llm_requests
 from src.agents.news_context import build_event_context
-from src.utils.data_source import active_data_source, source_or_canonical_path, source_prefixed_path
-from src.utils.io import ensure_dir, load_yaml, project_root, save_text
+from src.app.repositories.config_repository import load_experiment_config
+from src.app.repositories.report_repository import (
+    load_daily_bar as repo_load_daily_bar,
+    load_metrics as repo_load_metrics,
+    load_portfolio as repo_load_portfolio,
+    load_predictions as repo_load_predictions,
+    save_overlay_outputs as repo_save_overlay_outputs,
+)
+from src.utils.data_source import active_data_source, source_or_canonical_path
+from src.utils.io import ensure_dir, project_root
 from src.utils.logger import configure_logging
 
 logger = configure_logging()
@@ -121,6 +127,13 @@ THEME_RULES = [
 ]
 
 
+def _prefer_database(root: Path) -> bool:
+    try:
+        return root.resolve() == project_root().resolve()
+    except OSError:
+        return False
+
+
 def _overlay_config(experiment: dict) -> dict:
     overlay = dict(experiment.get("overlay", {}))
     overlay.setdefault("split", "test")
@@ -144,27 +157,44 @@ def _overlay_config(experiment: dict) -> dict:
 
 
 def _load_predictions(root: Path, data_source: str, model_name: str, split_name: str) -> pd.DataFrame:
-    path = source_or_canonical_path(root / "reports" / "weekly", f"{model_name}_{split_name}_predictions.csv", data_source)
-    if not path.exists():
-        return pd.DataFrame()
-    frame = pd.read_csv(path)
-    frame["trade_date"] = pd.to_datetime(frame["trade_date"])
+    frame = repo_load_predictions(
+        root,
+        data_source=data_source,
+        model_name=model_name,
+        split_name=split_name,
+        prefer_database=_prefer_database(root),
+    )
+    if frame.empty:
+        return frame
+    frame = frame.copy()
+    if "trade_date" in frame.columns:
+        frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
     return frame
 
 
 def _load_metrics(root: Path, data_source: str, model_name: str, split_name: str) -> dict:
-    path = source_or_canonical_path(root / "reports" / "weekly", f"{model_name}_{split_name}_metrics.json", data_source)
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    return repo_load_metrics(
+        root,
+        data_source=data_source,
+        model_name=model_name,
+        split_name=split_name,
+        prefer_database=_prefer_database(root),
+    )
 
 
 def _load_portfolio(root: Path, data_source: str, model_name: str, split_name: str) -> pd.DataFrame:
-    path = source_or_canonical_path(root / "reports" / "weekly", f"{model_name}_{split_name}_portfolio.csv", data_source)
-    if not path.exists():
-        return pd.DataFrame()
-    frame = pd.read_csv(path)
-    frame["trade_date"] = pd.to_datetime(frame["trade_date"])
+    frame = repo_load_portfolio(
+        root,
+        data_source=data_source,
+        model_name=model_name,
+        split_name=split_name,
+        prefer_database=_prefer_database(root),
+    )
+    if frame.empty:
+        return frame
+    frame = frame.copy()
+    if "trade_date" in frame.columns:
+        frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
     return frame
 
 
@@ -185,23 +215,14 @@ def _load_industry_name_map(root: Path, data_source: str) -> dict[str, str]:
             valid = board_map.loc[board_map["industry"].notna()].copy()
             mapping.update(valid.drop_duplicates("ts_code").set_index("ts_code")["industry"].astype(str).to_dict())
 
-    daily_bar_path = source_or_canonical_path(root / "data" / "staging", "daily_bar.parquet", data_source)
-    if daily_bar_path.exists():
-        available_columns = set(pq.ParquetFile(daily_bar_path).schema.names)
-        read_columns = [
-            column
-            for column in ("trade_date", "ts_code", "industry_current", "industry")
-            if column in available_columns
-        ]
+    daily_bar = repo_load_daily_bar(root, data_source=data_source, prefer_database=_prefer_database(root))
+    if not daily_bar.empty and "ts_code" in daily_bar.columns:
+        read_columns = [column for column in ("trade_date", "ts_code", "industry_current", "industry") if column in daily_bar.columns]
         if "ts_code" not in read_columns:
             return mapping
-        daily_bar = pd.read_parquet(
-            daily_bar_path,
-            columns=read_columns,
-        )
+        daily_bar = daily_bar.loc[:, read_columns].copy()
         if "trade_date" in daily_bar.columns:
-            daily_bar["trade_date"] = pd.to_datetime(daily_bar["trade_date"])
-        if "trade_date" in daily_bar.columns:
+            daily_bar["trade_date"] = pd.to_datetime(daily_bar["trade_date"], errors="coerce")
             daily_bar = daily_bar.sort_values("trade_date")
         daily_bar = daily_bar.drop_duplicates("ts_code", keep="last")
         if "industry_current" in daily_bar.columns:
@@ -580,6 +601,7 @@ def build_overlay_report_from_frames(
         ts_codes=event_codes,
         as_of_date=latest_date,
         cache_dir=root / "data" / "staging" / "event_cache",
+        data_source=data_source,
         notice_lookback_days=int(overlay["notice_lookback_days"]),
         notice_max_items=int(overlay["notice_max_items"]),
         news_lookback_days=int(overlay["news_lookback_days"]),
@@ -698,7 +720,7 @@ def build_overlay_report_from_frames(
 
 def build_overlay_report() -> tuple[pd.DataFrame, dict, str]:
     root = project_root()
-    experiment = load_yaml(root / "config" / "experiment.yaml")
+    experiment = load_experiment_config(root, prefer_database=False)
     data_source = active_data_source()
     overlay = _overlay_config(experiment)
     split_name = str(overlay["split"])
@@ -725,20 +747,14 @@ def run() -> None:
 
     overlay_candidates, packet, markdown = build_overlay_report()
     export_frame = overlay_candidates[[column for column in DISPLAY_COLUMNS if column in overlay_candidates.columns]].copy()
-
-    csv_source_path = source_prefixed_path(reports_dir, "overlay_latest_candidates.csv", data_source)
-    json_source_path = source_prefixed_path(reports_dir, "overlay_latest_packet.json", data_source)
-    markdown_source_path = source_prefixed_path(reports_dir, "overlay_latest_brief.md", data_source)
-
-    export_frame.to_csv(csv_source_path, index=False, encoding="utf-8-sig")
-    export_frame.to_csv(reports_dir / "overlay_latest_candidates.csv", index=False, encoding="utf-8-sig")
-    json_source_path.write_text(json.dumps(packet, ensure_ascii=False, indent=2), encoding="utf-8")
-    (reports_dir / "overlay_latest_packet.json").write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    repo_save_overlay_outputs(
+        root=root,
+        data_source=data_source,
+        scope="historical",
+        candidates=export_frame,
+        packet=packet,
+        brief=markdown,
     )
-    save_text(markdown, markdown_source_path)
-    save_text(markdown, reports_dir / "overlay_latest_brief.md")
 
     llm_artifacts = export_llm_requests(
         packet=packet,
@@ -746,15 +762,18 @@ def run() -> None:
         data_source=data_source,
     )
     packet["llm_bridge"] = llm_artifacts
-    json_source_path.write_text(json.dumps(packet, ensure_ascii=False, indent=2), encoding="utf-8")
-    (reports_dir / "overlay_latest_packet.json").write_text(
-        json.dumps(packet, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    repo_save_overlay_outputs(
+        root=root,
+        data_source=data_source,
+        scope="historical",
+        candidates=export_frame,
+        packet=packet,
+        brief=markdown,
     )
-    from src.db.dashboard_sync import sync_dashboard_artifacts
+    from src.db.dashboard_sync import sync_watchlist_snapshot_artifact
 
-    summary = sync_dashboard_artifacts(root=root, data_source=data_source)
-    logger.info(summary.message if summary.ok else f"Dashboard DB sync failed: {summary.message}")
+    summary = sync_watchlist_snapshot_artifact(root=root, data_source=data_source)
+    logger.info(summary.message if summary.ok else f"Watchlist snapshot sync failed: {summary.message}")
     logger.info(f"Saved overlay reports to {reports_dir}")
 
 

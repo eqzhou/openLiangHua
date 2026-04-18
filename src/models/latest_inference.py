@@ -9,34 +9,23 @@ from lightgbm import LGBMRegressor
 from sklearn.impute import SimpleImputer
 
 from src.agents.ensemble_weights import resolve_model_weights
+from src.app.repositories.report_repository import (
+    save_feature_quality_report,
+    save_inference_packet,
+    save_model_split_reports,
+)
+from src.app.services.model_workspace_service import build_model_panel, resolve_model_workspace
 from src.backtest.risk_filter import build_benchmark_proxy, latest_trend_state
 from src.models.feature_selection import select_feature_columns
 from src.models.train_ensemble import _apply_ensemble_score
 from src.models.train_linear import build_estimator, infer_feature_columns
 from src.models.walkforward import apply_inference_filters, apply_research_filters, history_until, neutralize_scores
-from src.utils.data_source import normalize_data_source, source_or_canonical_path, source_prefixed_path
-from src.utils.io import ensure_dir, load_yaml, project_root
+from src.utils.io import ensure_dir, project_root
 from src.utils.logger import configure_logging
 
 logger = configure_logging()
 
 MODEL_NAMES = ("ridge", "lgbm")
-
-
-def _resolve_data_source(root: Path) -> str:
-    universe = load_yaml(root / "config" / "universe.yaml")
-    return normalize_data_source(universe.get("data_source", "akshare"))
-
-
-def _load_dataset(root: Path, data_source: str) -> tuple[pd.DataFrame, dict]:
-    features = pd.read_parquet(source_or_canonical_path(root / "data" / "features", "feature_panel.parquet", data_source))
-    labels = pd.read_parquet(source_or_canonical_path(root / "data" / "labels", "label_panel.parquet", data_source))
-    experiment = load_yaml(root / "config" / "experiment.yaml")
-    experiment["data_source"] = data_source
-
-    panel = features.merge(labels, on=["trade_date", "ts_code"], how="inner")
-    panel["trade_date"] = pd.to_datetime(panel["trade_date"])
-    return panel.sort_values(["trade_date", "ts_code"]).reset_index(drop=True), experiment
 
 
 def _training_history(panel: pd.DataFrame, experiment: dict, label_col: str, latest_feature_date: pd.Timestamp) -> pd.DataFrame:
@@ -109,23 +98,14 @@ def _score_snapshot(
     return scored
 
 
-def _save_prediction_frame(reports_dir: Path, data_source: str, filename: str, frame: pd.DataFrame) -> dict[str, str]:
-    source_path = source_prefixed_path(reports_dir, filename, data_source)
-    canonical_path = reports_dir / filename
-    frame.to_csv(source_path, index=False)
-    frame.to_csv(canonical_path, index=False)
-    return {
-        "source_path": str(source_path),
-        "canonical_path": str(canonical_path),
-    }
-
-
 def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
     resolved_root = root or project_root()
-    data_source = _resolve_data_source(resolved_root)
+    workspace = resolve_model_workspace(resolved_root)
+    data_source = workspace.data_source
     reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
 
-    panel, experiment = _load_dataset(resolved_root, data_source)
+    panel = build_model_panel(workspace)
+    experiment = workspace.experiment
     market_panel = panel.copy()
     label_col = str(experiment["label_col"])
     latest_feature_date = pd.Timestamp(panel["trade_date"].max())
@@ -193,13 +173,46 @@ def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
     benchmark_proxy = build_benchmark_proxy(market_panel, experiment=experiment)
     risk_state = latest_trend_state(benchmark_proxy, experiment=experiment, as_of_date=latest_feature_date)
 
-    ridge_paths = _save_prediction_frame(reports_dir, data_source, "ridge_inference_predictions.csv", ridge_frame)
-    lgbm_paths = _save_prediction_frame(reports_dir, data_source, "lgbm_inference_predictions.csv", lgbm_frame)
-    ensemble_paths = _save_prediction_frame(reports_dir, data_source, "ensemble_inference_predictions.csv", ensemble_frame)
+    ridge_paths = save_model_split_reports(
+        resolved_root,
+        data_source=data_source,
+        model_name="ridge",
+        split_name="inference",
+        predictions=ridge_frame,
+        portfolio=pd.DataFrame(),
+        metrics={},
+        diagnostics={},
+    )
+    lgbm_paths = save_model_split_reports(
+        resolved_root,
+        data_source=data_source,
+        model_name="lgbm",
+        split_name="inference",
+        predictions=lgbm_frame,
+        portfolio=pd.DataFrame(),
+        metrics={},
+        diagnostics={},
+    )
+    ensemble_paths = save_model_split_reports(
+        resolved_root,
+        data_source=data_source,
+        model_name="ensemble",
+        split_name="inference",
+        predictions=ensemble_frame,
+        portfolio=pd.DataFrame(),
+        metrics={},
+        diagnostics={},
+    )
 
     feature_quality_export = feature_quality.copy()
     if not feature_quality_export.empty:
-        quality_paths = _save_prediction_frame(reports_dir, data_source, "inference_feature_quality.csv", feature_quality_export)
+        quality_path = save_feature_quality_report(
+            resolved_root,
+            data_source=data_source,
+            filename="inference_feature_quality.csv",
+            frame=feature_quality_export,
+        )
+        quality_paths = {"source_path": str(quality_path)}
     else:
         quality_paths = {}
 
@@ -238,9 +251,7 @@ def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
         },
     }
 
-    packet_path = source_prefixed_path(reports_dir, "inference_packet.json", data_source)
-    packet_path.write_text(json.dumps(packet, ensure_ascii=False, indent=2), encoding="utf-8")
-    (reports_dir / "inference_packet.json").write_text(json.dumps(packet, ensure_ascii=False, indent=2), encoding="utf-8")
+    packet_path = save_inference_packet(resolved_root, data_source=data_source, payload=packet)
     logger.info(f"Saved latest inference packet to {packet_path}")
     return packet
 

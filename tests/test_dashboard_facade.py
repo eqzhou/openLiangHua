@@ -11,10 +11,14 @@ from src.app.facades.dashboard_facade import (
     get_ai_review_summary_payload,
     get_candidate_history_payload,
     get_candidates_summary_payload,
+    get_data_management_payload,
     get_factor_explorer_detail_payload,
     get_factor_explorer_summary_payload,
     get_home_payload,
     get_overview_payload,
+    refresh_realtime_payload,
+    run_tushare_full_refresh_payload,
+    run_tushare_incremental_refresh_payload,
     get_service_payload,
     get_shell_payload,
     get_watchlist_detail_payload,
@@ -24,6 +28,65 @@ from src.app.facades.dashboard_facade import (
 
 
 class DashboardFacadeTests(unittest.TestCase):
+    def test_data_management_payload_passes_through_status_contract(self) -> None:
+        with patch(
+            "src.app.facades.dashboard_facade.build_data_management_payload",
+            return_value={
+                "targetSource": "akshare",
+                "tokenConfigured": True,
+                "dailyBar": {"latestTradeDate": "2026-04-16"},
+                "featurePanel": {"latestTradeDate": "2026-04-16"},
+                "labelPanel": {"latestTradeDate": "2026-04-16"},
+                "scripts": {"incremental": "scripts/refresh_daily_bar_tushare.ps1", "fullRefresh": "scripts/refresh_full_pipeline_tushare.ps1"},
+            },
+        ):
+            payload = get_data_management_payload()
+
+        self.assertEqual(payload["targetSource"], "akshare")
+        self.assertTrue(payload["tokenConfigured"])
+        self.assertIn("dailyBar", payload)
+        self.assertIn("scripts", payload)
+
+    def test_run_tushare_incremental_refresh_payload_clears_dashboard_caches(self) -> None:
+        with (
+            patch(
+                "src.app.facades.dashboard_facade.run_tushare_incremental_refresh",
+                return_value={
+                    "target_source": "akshare",
+                    "latest_trade_date": "2026-04-16",
+                    "appended_rows": 116,
+                },
+            ),
+            patch("src.app.facades.dashboard_facade.clear_dashboard_caches") as clear_caches,
+        ):
+            payload = run_tushare_incremental_refresh_payload(target_source="akshare", end_date="2026-04-16")
+
+        self.assertEqual(payload["actionName"], "tushare_incremental_refresh")
+        self.assertTrue(payload["ok"])
+        self.assertIn("2026-04-16", payload["output"])
+        clear_caches.assert_called_once()
+
+    def test_run_tushare_full_refresh_payload_clears_dashboard_caches(self) -> None:
+        with (
+            patch(
+                "src.app.facades.dashboard_facade.run_tushare_full_refresh",
+                return_value={
+                    "ok": True,
+                    "target_source": "akshare",
+                    "incremental": {"latest_trade_date": "2026-04-16"},
+                    "features": {"feature_rows": 1200, "label_rows": 1180},
+                    "dashboardSync": {"message": "dashboard synced"},
+                },
+            ),
+            patch("src.app.facades.dashboard_facade.clear_dashboard_caches") as clear_caches,
+        ):
+            payload = run_tushare_full_refresh_payload(target_source="akshare", end_date="2026-04-16")
+
+        self.assertEqual(payload["actionName"], "tushare_full_refresh")
+        self.assertTrue(payload["ok"])
+        self.assertIn("1200", payload["output"])
+        clear_caches.assert_called_once()
+
     def test_overview_payload_exposes_selected_split_and_tables(self) -> None:
         payload = get_overview_payload("test")
 
@@ -48,6 +111,7 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertIn("watchlist", payload)
         self.assertIn("candidates", payload)
         self.assertIn("aiReview", payload)
+        self.assertIn("shortlistMarkdown", payload["aiReview"])
         self.assertIn("alerts", payload)
 
     def test_candidates_summary_payload_prefers_precomputed_snapshot(self) -> None:
@@ -107,6 +171,19 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertIn("selectedRecord", payload["historical"])
         self.assertNotIn("brief", payload["inference"])
 
+    def test_ai_review_summary_payload_gracefully_handles_candidates_without_symbol_column(self) -> None:
+        inference_candidates = pd.DataFrame([{"name": "无代码候选", "final_score": 0.4}])
+
+        with (
+            patch("src.app.facades.dashboard_facade.load_overlay_inference_candidates", return_value=inference_candidates),
+            patch("src.app.facades.dashboard_facade.load_overlay_candidates", return_value=pd.DataFrame()),
+        ):
+            payload = get_ai_review_summary_payload()
+
+        self.assertEqual(payload["inference"]["selectedSymbol"], "")
+        self.assertEqual(payload["inference"]["selectedRecord"], {})
+        self.assertEqual(payload["inference"]["candidateCount"], 1)
+
     def test_ai_review_detail_payload_returns_selected_record_and_detail_fields(self) -> None:
         candidates = pd.DataFrame(
             [
@@ -120,18 +197,30 @@ class DashboardFacadeTests(unittest.TestCase):
                 }
             ]
         )
-        packet = {"llm_bridge": {"response_jsonl_path": ""}}
-
         with (
             patch("src.app.facades.dashboard_facade.load_overlay_inference_candidates", return_value=candidates),
-            patch("src.app.facades.dashboard_facade.load_overlay_inference_packet", return_value=packet),
             patch("src.app.facades.dashboard_facade.load_overlay_inference_brief", return_value="测试纪要"),
+            patch(
+                "src.app.facades.dashboard_facade.load_overlay_llm_bundle",
+                return_value={
+                    "response_lookup": {
+                        "000001.SZ": {
+                            "custom_id": "000001.SZ",
+                            "status": "success",
+                            "output_text": "数据库回写结果",
+                        }
+                    },
+                    "response_summary": "数据库回写纪要",
+                },
+            ),
         ):
             payload = get_ai_review_detail_payload(scope="inference", symbol="000001.SZ")
 
         self.assertEqual(payload["selectedSymbol"], "000001.SZ")
         self.assertEqual(payload["selectedRecord"]["name"], "示例推理")
         self.assertEqual(payload["brief"], "测试纪要")
+        self.assertEqual(payload["llmResponse"]["status"], "success")
+        self.assertEqual(payload["responseSummary"], "数据库回写纪要")
         self.assertIn("fieldRows", payload)
 
     def test_factor_summary_payload_prefers_snapshot_contract(self) -> None:
@@ -216,6 +305,56 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertIn("refreshSymbols", payload)
         self.assertIn("refreshPreviousCloses", payload)
 
+    def test_refresh_realtime_payload_reports_snapshot_status(self) -> None:
+        base_frame = pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "name": "示例股票",
+                    "latest_bar_close": 9.8,
+                }
+            ]
+        )
+        realtime_quotes = pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "realtime_price": 10.5,
+                    "realtime_time": pd.Timestamp("2026-04-03 10:00:00"),
+                    "realtime_quote_source": "sina-quote",
+                }
+            ]
+        )
+
+        with (
+            patch("src.app.facades.dashboard_facade.build_watchlist_base_frame", return_value=base_frame),
+            patch(
+                "src.app.facades.dashboard_facade.fetch_managed_realtime_quotes",
+                return_value=(
+                    realtime_quotes,
+                    {
+                        "available": True,
+                        "source": "sina-quote",
+                        "trade_date": "2026-04-03",
+                        "fetched_at": "2026-04-03T10:00:00+08:00",
+                        "requested_symbol_count": 1,
+                        "success_symbol_count": 1,
+                        "failed_symbols": [],
+                        "error_message": "",
+                        "snapshot_bucket": "latest",
+                        "served_from": "provider",
+                    },
+                ),
+            ),
+            patch("src.app.facades.dashboard_facade.pd.Timestamp.now", return_value=pd.Timestamp("2026-04-03 10:00:00+08:00")),
+        ):
+            payload = refresh_realtime_payload()
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["symbolCount"], 1)
+        self.assertEqual(payload["realtimeRecordCount"], 1)
+        self.assertEqual(payload["realtimeStatus"]["snapshot_label_display"], "最新盘中快照")
+
     def test_watchlist_summary_payload_returns_list_first_contract(self) -> None:
         payload = get_watchlist_summary_payload()
 
@@ -230,6 +369,38 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertIn("detail", payload)
         self.assertIn("history", payload)
         self.assertIn("watchPlan", payload)
+        self.assertIn("latestAiShortlist", payload)
+
+    def test_watchlist_detail_payload_handles_missing_prediction_columns(self) -> None:
+        base_frame = pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "name": "示例股票",
+                    "industry": "银行",
+                    "entry_group": "持仓",
+                    "mark_price": 10.0,
+                    "latest_bar_close": 9.8,
+                    "market_value": 10000.0,
+                    "unrealized_pnl": 200.0,
+                    "unrealized_pnl_pct": 0.02,
+                    "watch_level": "观察",
+                    "action_brief": "继续观察",
+                    "premarket_plan": "观察承接",
+                }
+            ]
+        )
+
+        with (
+            patch("src.app.facades.dashboard_facade.build_watchlist_base_frame", return_value=base_frame),
+            patch("src.app.facades.dashboard_facade.filtered_watchlist_view", side_effect=lambda frame, **_: frame.reset_index(drop=True)),
+            patch("src.app.facades.dashboard_facade.load_predictions", return_value=pd.DataFrame()),
+            patch("src.app.facades.dashboard_facade.load_latest_symbol_markdown", return_value={}),
+        ):
+            payload = get_watchlist_detail_payload(symbol="000001.SZ")
+
+        self.assertEqual(payload["selectedSymbol"], "000001.SZ")
+        self.assertEqual(payload["history"], [])
 
     def test_watchlist_payload_uses_cached_snapshot_by_default(self) -> None:
         base_frame = pd.DataFrame(

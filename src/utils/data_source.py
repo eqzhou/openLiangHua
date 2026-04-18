@@ -4,7 +4,12 @@ from pathlib import Path
 
 from src.utils.io import load_yaml, project_root
 
-SUPPORTED_DATA_SOURCES = {"akshare", "myquant"}
+SUPPORTED_DATA_SOURCES = {"akshare", "tushare", "myquant"}
+SOURCE_ALIASES = {
+    "akshare": ("akshare", "tushare"),
+    "tushare": ("tushare", "akshare"),
+    "myquant": ("myquant",),
+}
 
 
 def normalize_data_source(value: str | None) -> str:
@@ -12,6 +17,11 @@ def normalize_data_source(value: str | None) -> str:
     if source not in SUPPORTED_DATA_SOURCES:
         raise ValueError(f"Unsupported data_source: {value}")
     return source
+
+
+def source_aliases(value: str | None) -> tuple[str, ...]:
+    normalized = normalize_data_source(value)
+    return SOURCE_ALIASES.get(normalized, (normalized,))
 
 
 def active_data_source() -> str:
@@ -25,10 +35,15 @@ def source_prefixed_path(directory: Path, filename: str, source: str) -> Path:
 
 
 def source_or_canonical_path(directory: Path, filename: str, source: str) -> Path:
-    normalized = normalize_data_source(source)
-    source_path = source_prefixed_path(directory, filename, normalized)
-    if source_path.exists():
-        return source_path
-    if normalized == "akshare":
-        return directory / filename
-    return source_path
+    aliases = source_aliases(source)
+    for alias in aliases:
+        source_path = source_prefixed_path(directory, filename, alias)
+        if source_path.exists():
+            return source_path
+
+    normalized = aliases[0]
+    if normalized in {"akshare", "tushare"}:
+        canonical_path = directory / filename
+        if canonical_path.exists():
+            return canonical_path
+    return source_prefixed_path(directory, filename, normalized)

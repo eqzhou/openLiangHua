@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from src.utils.data_source import source_or_canonical_path
+from src.app.repositories.report_repository import (
+    load_overlay_candidates,
+    load_overlay_inference_candidates,
+    load_overlay_inference_packet,
+    load_overlay_llm_bundle,
+    load_overlay_packet,
+)
+from src.utils.io import project_root
 
 ROUND_SPECS = (
     {
@@ -38,39 +44,8 @@ STATUS_LABELS = {
 }
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _read_response_lookup(path_text: str) -> dict[str, dict[str, Any]]:
-    if not path_text:
-        return {}
-    path = Path(path_text)
-    if not path.exists():
-        return {}
-
-    lookup: dict[str, dict[str, Any]] = {}
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        payload = line.strip()
-        if not payload:
-            continue
-        try:
-            record = json.loads(payload)
-        except json.JSONDecodeError:
-            continue
-        symbol = str(record.get("custom_id", "") or "").strip()
-        if symbol:
-            lookup[symbol] = record
-    return lookup
-
-
-def _candidate_pool_lookup(path: Path) -> tuple[dict[str, int], int]:
-    if not path.exists():
-        return {}, 0
-    frame = pd.read_csv(path, usecols=["ts_code"])
-    if frame.empty:
+def _candidate_pool_lookup(frame: pd.DataFrame) -> tuple[dict[str, int], int]:
+    if frame.empty or "ts_code" not in frame.columns:
         return {}, 0
     frame = frame.reset_index(drop=True)
     lookup = {str(ts_code): int(index + 1) for index, ts_code in enumerate(frame["ts_code"].astype(str))}
@@ -91,6 +66,13 @@ def _truncate_text(text: str, limit: int = 220) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 3].rstrip() + "..."
+
+
+def _prefer_database(root: Path) -> bool:
+    try:
+        return root.resolve() == project_root().resolve()
+    except OSError:
+        return False
 
 
 def _round_status_label(round_info: dict[str, Any]) -> str:
@@ -178,21 +160,37 @@ def _build_round_info(
 
 
 def load_symbol_discussion_snapshot(root: Path, data_source: str, symbol: str) -> dict[str, Any]:
-    reports_dir = root / "reports" / "weekly"
     normalized_symbol = str(symbol or "").strip()
     rounds: list[dict[str, Any]] = []
 
     for spec in ROUND_SPECS:
-        packet_path = source_or_canonical_path(reports_dir, spec["packet_filename"], data_source)
-        candidate_path = source_or_canonical_path(reports_dir, spec["candidates_filename"], data_source)
-        if not packet_path.exists() and not candidate_path.exists():
+        if spec["round_key"] == "latest_inference":
+            packet = load_overlay_inference_packet(root, data_source=data_source, prefer_database=_prefer_database(root))
+            candidates = load_overlay_inference_candidates(root, data_source=data_source, prefer_database=_prefer_database(root))
+            llm_bundle = load_overlay_llm_bundle(
+                root,
+                data_source=data_source,
+                scope="inference",
+                packet=packet,
+                prefer_database=_prefer_database(root),
+            )
+        else:
+            packet = load_overlay_packet(root, data_source=data_source, prefer_database=_prefer_database(root))
+            candidates = load_overlay_candidates(root, data_source=data_source, prefer_database=_prefer_database(root))
+            llm_bundle = load_overlay_llm_bundle(
+                root,
+                data_source=data_source,
+                scope="historical",
+                packet=packet,
+                prefer_database=_prefer_database(root),
+            )
+
+        if not packet and candidates.empty:
             continue
 
-        packet = _read_json(packet_path) if packet_path.exists() else {}
-        candidate_lookup, candidate_pool_size = _candidate_pool_lookup(candidate_path)
+        candidate_lookup, candidate_pool_size = _candidate_pool_lookup(candidates)
         selected_lookup = _selected_candidate_lookup(packet)
-        llm_bridge = packet.get("llm_bridge", {}) or {}
-        response_lookup = _read_response_lookup(str(llm_bridge.get("response_jsonl_path", "") or ""))
+        response_lookup = dict(llm_bundle.get("response_lookup", {}) or {})
         round_info = _build_round_info(
             spec=spec,
             packet=packet,

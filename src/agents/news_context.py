@@ -7,6 +7,14 @@ from pathlib import Path
 import akshare as ak
 import pandas as pd
 
+from src.app.repositories.event_repository import (
+    load_news_cache as repo_load_news_cache,
+    load_notice_cache as repo_load_notice_cache,
+    load_research_cache as repo_load_research_cache,
+    save_news_cache as repo_save_news_cache,
+    save_notice_cache as repo_save_notice_cache,
+    save_research_cache as repo_save_research_cache,
+)
 from src.utils.io import ensure_dir
 
 
@@ -21,38 +29,59 @@ def _symbol_code(ts_code: str) -> str:
     return str(ts_code).split(".")[0]
 
 
-def _notice_cache_path(cache_dir: Path, notice_date: pd.Timestamp) -> Path:
-    return cache_dir / f"notice_{notice_date.strftime('%Y%m%d')}.parquet"
+def _prefer_database(cache_dir: Path) -> bool:
+    try:
+        return "openLiangHua" in str(cache_dir.resolve())
+    except OSError:
+        return False
 
 
-def _research_cache_path(cache_dir: Path, symbol_code: str) -> Path:
-    return cache_dir / f"research_{symbol_code}.parquet"
-
-
-def _fetch_notice_day(cache_dir: Path, notice_date: pd.Timestamp) -> pd.DataFrame:
-    cache_path = _notice_cache_path(cache_dir, notice_date)
-    if cache_path.exists():
-        return pd.read_parquet(cache_path)
+def _fetch_notice_day(cache_dir: Path, notice_date: pd.Timestamp, data_source: str) -> pd.DataFrame:
+    cached = repo_load_notice_cache(
+        cache_dir,
+        notice_date,
+        data_source=data_source,
+        prefer_database=_prefer_database(cache_dir),
+    )
+    if not cached.empty:
+        return cached
 
     _disable_proxy()
     frame = ak.stock_notice_report(symbol="全部", date=notice_date.strftime("%Y%m%d")).copy()
     if not frame.empty:
         frame["公告日期"] = pd.to_datetime(frame["公告日期"], errors="coerce")
-    frame.to_parquet(cache_path, index=False)
+    repo_save_notice_cache(
+        cache_dir,
+        notice_date,
+        frame,
+        data_source=data_source,
+        prefer_database=_prefer_database(cache_dir),
+    )
     return frame
 
 
-def _fetch_research_reports(cache_dir: Path, ts_code: str) -> pd.DataFrame:
+def _fetch_research_reports(cache_dir: Path, ts_code: str, data_source: str) -> pd.DataFrame:
     symbol_code = _symbol_code(ts_code)
-    cache_path = _research_cache_path(cache_dir, symbol_code)
-    if cache_path.exists():
-        return pd.read_parquet(cache_path)
+    cached = repo_load_research_cache(
+        cache_dir,
+        symbol_code,
+        data_source=data_source,
+        prefer_database=_prefer_database(cache_dir),
+    )
+    if not cached.empty:
+        return cached
 
     _disable_proxy()
     frame = ak.stock_research_report_em(symbol=symbol_code).copy()
     if not frame.empty and "日期" in frame.columns:
         frame["日期"] = pd.to_datetime(frame["日期"], errors="coerce")
-    frame.to_parquet(cache_path, index=False)
+    repo_save_research_cache(
+        cache_dir,
+        symbol_code,
+        frame,
+        data_source=data_source,
+        prefer_database=_prefer_database(cache_dir),
+    )
     return frame
 
 
@@ -103,9 +132,31 @@ def _summarize_notices(frame: pd.DataFrame, ts_code: str, lookback_days: int, ma
     }
 
 
-def _summarize_news(ts_code: str, as_of_date: pd.Timestamp, lookback_days: int, max_items: int) -> dict[str, object]:
-    _disable_proxy()
-    frame = ak.stock_news_em(symbol=_symbol_code(ts_code)).copy()
+def _summarize_news(
+    cache_dir: Path,
+    ts_code: str,
+    as_of_date: pd.Timestamp,
+    data_source: str,
+    lookback_days: int,
+    max_items: int,
+) -> dict[str, object]:
+    symbol_code = _symbol_code(ts_code)
+    frame = repo_load_news_cache(
+        cache_dir,
+        symbol_code,
+        data_source=data_source,
+        prefer_database=_prefer_database(cache_dir),
+    )
+    if frame.empty:
+        _disable_proxy()
+        frame = ak.stock_news_em(symbol=symbol_code).copy()
+        repo_save_news_cache(
+            cache_dir,
+            symbol_code,
+            frame,
+            data_source=data_source,
+            prefer_database=_prefer_database(cache_dir),
+        )
     if frame.empty:
         return {
             "news_count": 0,
@@ -156,10 +207,11 @@ def _summarize_research_reports(
     cache_dir: Path,
     ts_code: str,
     as_of_date: pd.Timestamp,
+    data_source: str,
     lookback_days: int,
     max_items: int,
 ) -> dict[str, object]:
-    frame = _fetch_research_reports(cache_dir, ts_code)
+    frame = _fetch_research_reports(cache_dir, ts_code, data_source)
     if frame.empty or "日期" not in frame.columns:
         return {
             "research_count": 0,
@@ -230,6 +282,7 @@ def build_event_context(
     ts_codes: list[str],
     as_of_date: pd.Timestamp,
     cache_dir: Path,
+    data_source: str | None = None,
     notice_lookback_days: int = 7,
     notice_max_items: int = 3,
     news_lookback_days: int = 7,
@@ -241,13 +294,14 @@ def build_event_context(
         return pd.DataFrame()
 
     ensure_dir(cache_dir)
+    resolved_data_source = str(data_source or active_data_source()).strip() or "akshare"
     as_of_date = pd.Timestamp(as_of_date).normalize()
 
     notice_frames: list[pd.DataFrame] = []
     for offset in range(max(1, int(notice_lookback_days))):
         notice_date = as_of_date - timedelta(days=offset)
         try:
-            notice_frames.append(_fetch_notice_day(cache_dir, notice_date))
+            notice_frames.append(_fetch_notice_day(cache_dir, notice_date, resolved_data_source))
         except Exception:
             continue
     notice_frame = pd.concat(notice_frames, ignore_index=True) if notice_frames else pd.DataFrame()
@@ -264,8 +318,10 @@ def build_event_context(
         )
         try:
             news_summary = _summarize_news(
+                cache_dir=cache_dir,
                 ts_code=ts_code,
                 as_of_date=as_of_date,
+                data_source=resolved_data_source,
                 lookback_days=news_lookback_days,
                 max_items=news_max_items,
             )
@@ -283,6 +339,7 @@ def build_event_context(
                 cache_dir=cache_dir,
                 ts_code=ts_code,
                 as_of_date=as_of_date,
+                data_source=resolved_data_source,
                 lookback_days=research_lookback_days,
                 max_items=research_max_items,
             )

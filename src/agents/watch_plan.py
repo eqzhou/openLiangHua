@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.app.repositories.config_repository import load_watchlist_config
+from src.app.repositories.report_repository import save_symbol_note as repo_save_symbol_note
 from src.app.services.holding_snapshot_service import (
     build_holding_snapshot,
     fmt_date,
@@ -16,7 +18,7 @@ from src.app.services.holding_snapshot_service import (
     read_daily_bar,
     resolve_data_source,
 )
-from src.utils.io import ensure_dir, load_yaml, project_root, save_text
+from src.utils.io import project_root
 from src.utils.logger import configure_logging
 
 logger = configure_logging()
@@ -150,14 +152,13 @@ def _compose_watch_plan(snapshot: dict[str, object]) -> str:
 
 def generate_watch_plans(root: Path | None = None) -> list[Path]:
     resolved_root = root or project_root()
-    watchlist = load_yaml(resolved_root / "config" / "watchlist.yaml").get("holdings", []) or []
+    watchlist = load_watchlist_config(resolved_root, prefer_database=False).get("holdings", []) or []
     if not watchlist:
         logger.info("No holdings were found in config/watchlist.yaml.")
         return []
 
     data_source = resolve_data_source(resolved_root)
     symbols = [str(item.get("ts_code", "") or "").strip() for item in watchlist if str(item.get("ts_code", "") or "").strip()]
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
     daily_bar = read_daily_bar(resolved_root, data_source, symbols=symbols)
     trade_dates = load_trade_dates(resolved_root, data_source)
     prediction_snapshots = load_prediction_snapshots(resolved_root, data_source)
@@ -177,8 +178,14 @@ def generate_watch_plans(root: Path | None = None) -> list[Path]:
             trade_dates=trade_dates,
         )
         plan_date = snapshot.get("plan_date") or pd.Timestamp.today().date().isoformat()
-        output_path = reports_dir / f"{symbol.split('.')[0]}_watch_plan_{plan_date}.md"
-        save_text(_compose_watch_plan(snapshot), output_path)
+        output_path = repo_save_symbol_note(
+            resolved_root,
+            data_source=data_source,
+            symbol=symbol,
+            note_kind="watch_plan",
+            plan_date=str(plan_date),
+            content=_compose_watch_plan(snapshot),
+        )
         generated_paths.append(output_path)
         logger.info(f"Generated watch plan: {output_path}")
 

@@ -1,4 +1,4 @@
-data_source: akshare
+data_source: tushare
 benchmark: 000905.SH
 mode: current_index
 index_code: 000905.SH

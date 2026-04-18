@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -20,7 +19,6 @@ def _render_overlay_panel(
     inspect_key: str,
     prettify_dataframe: Callable[[pd.DataFrame], pd.DataFrame],
     read_jsonl_records: Callable[[str], list[dict]],
-    read_text: Callable[[Path], str],
 ) -> None:
     st.markdown(f"**{title}**")
     if candidates.empty:
@@ -35,9 +33,6 @@ def _render_overlay_panel(
     inference_packet = packet.get("inference_packet", {}) if packet else {}
     llm_response_records = read_jsonl_records(str(llm_bridge.get("response_jsonl_path", ""))) if llm_bridge else []
     llm_response_lookup = build_llm_response_lookup(llm_response_records)
-    response_summary_path = str(llm_bridge.get("response_summary_path", "") or "").strip()
-    response_summary = read_text(Path(response_summary_path)) if response_summary_path else ""
-
     ai_cards = st.columns(4)
     ai_cards[0].metric("AI候选池数量", int(len(candidates)))
     ai_cards[1].metric("AI入选数量", int(packet.get("top_n", 0) or 0))
@@ -109,28 +104,14 @@ def _render_overlay_panel(
         llm_cols[3].metric("桥接模式", str(llm_bridge.get("provider", "prompt_only")))
         llm_cols[4].metric("模型名", str(llm_bridge.get("model", "") or "未配置"))
         llm_cols[5].metric("执行状态", str(llm_bridge.get("execution_status", "unknown")))
-        if llm_bridge.get("jsonl_path"):
-            st.caption(f"请求包文件：{llm_bridge.get('jsonl_path')}")
-        if llm_bridge.get("response_jsonl_path"):
-            st.caption(f"响应文件：{llm_bridge.get('response_jsonl_path')}")
-        reasoning_parts: list[str] = []
-        if llm_bridge.get("reasoning_effort"):
-            reasoning_parts.append(f"reasoning.effort={llm_bridge.get('reasoning_effort')}")
-        if llm_bridge.get("reasoning_summary"):
-            reasoning_parts.append(f"reasoning.summary={llm_bridge.get('reasoning_summary')}")
-        if llm_bridge.get("max_output_tokens"):
-            reasoning_parts.append(f"max_output_tokens={llm_bridge.get('max_output_tokens')}")
-        if reasoning_parts:
-            st.caption(" | ".join(str(part) for part in reasoning_parts))
         blocking_reason = str(llm_bridge.get("blocking_reason", "") or "").strip()
         if blocking_reason:
             if llm_bridge.get("execution_status") in {"configuration_incomplete", "execution_failed", "executed_with_errors"}:
                 st.warning(blocking_reason)
             else:
                 st.info(blocking_reason)
-        if response_summary:
-            with st.expander("查看外部模型自动研讨纪要", expanded=False):
-                st.markdown(response_summary)
+        elif int(llm_bridge.get("success_count", 0) or 0) > 0:
+            st.caption("界面已隐藏外部模型自动研讨原文，仅保留结构化摘要与状态。")
 
     inspect_options = candidates["ts_code"].tolist()
     inspect_symbol = st.selectbox("查看单只股票的 AI 解释", inspect_options, key=inspect_key)
@@ -159,17 +140,12 @@ def _render_overlay_panel(
         st.write(inspected_row.get("ai_brief", ""))
         llm_response = llm_response_lookup.get(inspect_symbol)
         if llm_response:
-            st.markdown("**外部模型自动研讨**")
             if llm_response.get("status") == "success":
-                st.write(llm_response.get("output_text", ""))
+                st.caption("该股票已生成外部模型研讨结果，界面不展示对话原文。")
             else:
                 st.error(str(llm_response.get("error", "外部模型执行失败")))
-        st.markdown("**可继续交给大模型的提示词**")
-        st.code(inspected_row.get("agent_prompt", ""), language="text")
-
     if brief:
-        with st.expander("查看完整 AI 研判纪要", expanded=False):
-            st.markdown(brief)
+        st.caption("完整 AI 研判纪要仍已落盘，界面默认不展开全文。")
 
 
 def render_ai_review_page(
@@ -182,7 +158,6 @@ def render_ai_review_page(
     overlay_brief: str,
     prettify_dataframe: Callable[[pd.DataFrame], pd.DataFrame],
     read_jsonl_records: Callable[[str], list[dict]],
-    read_text: Callable[[Path], str],
 ) -> None:
     st.subheader("AI二次研判")
     if overlay_inference_candidates.empty and overlay_candidates.empty:
@@ -198,7 +173,6 @@ def render_ai_review_page(
         inspect_key="overlay_inference_symbol",
         prettify_dataframe=prettify_dataframe,
         read_jsonl_records=read_jsonl_records,
-        read_text=read_text,
     )
     st.divider()
     _render_overlay_panel(
@@ -210,7 +184,6 @@ def render_ai_review_page(
         inspect_key="overlay_symbol",
         prettify_dataframe=prettify_dataframe,
         read_jsonl_records=read_jsonl_records,
-        read_text=read_text,
     )
 
 
@@ -227,8 +200,6 @@ def _render_overlay_payload_panel(
     brief = str(panel_payload.get("brief", "") or "")
     selected_record = dict(panel_payload.get("selectedRecord", {}) or {})
     llm_response = dict(panel_payload.get("llmResponse", {}) or {})
-    response_summary = str(panel_payload.get("responseSummary", "") or "")
-
     st.markdown(f"**{title}**")
     if candidates.empty:
         st.info(empty_message)
@@ -312,28 +283,14 @@ def _render_overlay_payload_panel(
         llm_cols[3].metric("桥接模式", str(llm_bridge.get("provider", "prompt_only")))
         llm_cols[4].metric("模型名", str(llm_bridge.get("model", "") or "未配置"))
         llm_cols[5].metric("执行状态", str(llm_bridge.get("execution_status", "unknown")))
-        if llm_bridge.get("jsonl_path"):
-            st.caption(f"请求包文件：{llm_bridge.get('jsonl_path')}")
-        if llm_bridge.get("response_jsonl_path"):
-            st.caption(f"响应文件：{llm_bridge.get('response_jsonl_path')}")
-        reasoning_parts: list[str] = []
-        if llm_bridge.get("reasoning_effort"):
-            reasoning_parts.append(f"reasoning.effort={llm_bridge.get('reasoning_effort')}")
-        if llm_bridge.get("reasoning_summary"):
-            reasoning_parts.append(f"reasoning.summary={llm_bridge.get('reasoning_summary')}")
-        if llm_bridge.get("max_output_tokens"):
-            reasoning_parts.append(f"max_output_tokens={llm_bridge.get('max_output_tokens')}")
-        if reasoning_parts:
-            st.caption(" | ".join(str(part) for part in reasoning_parts))
         blocking_reason = str(llm_bridge.get("blocking_reason", "") or "").strip()
         if blocking_reason:
             if llm_bridge.get("execution_status") in {"configuration_incomplete", "execution_failed", "executed_with_errors"}:
                 st.warning(blocking_reason)
             else:
                 st.info(blocking_reason)
-        if response_summary:
-            with st.expander("查看外部模型自动研讨纪要", expanded=False):
-                st.markdown(response_summary)
+        elif int(llm_bridge.get("success_count", 0) or 0) > 0:
+            st.caption("界面已隐藏外部模型自动研讨原文，仅保留结构化摘要与状态。")
 
     inspect_options = candidates["ts_code"].astype(str).tolist()
     selected_symbol = str(panel_payload.get("selectedSymbol") or inspect_options[0])
@@ -361,17 +318,12 @@ def _render_overlay_payload_panel(
         st.markdown("**中文研判摘要**")
         st.write(selected_record.get("ai_brief", ""))
         if llm_response:
-            st.markdown("**外部模型自动研讨**")
             if llm_response.get("status") == "success":
-                st.write(llm_response.get("output_text", ""))
+                st.caption("该股票已生成外部模型研讨结果，界面不展示对话原文。")
             else:
                 st.error(str(llm_response.get("error", "外部模型执行失败")))
-        st.markdown("**可继续交给大模型的提示词**")
-        st.code(selected_record.get("agent_prompt", ""), language="text")
-
     if brief:
-        with st.expander("查看完整 AI 研判纪要", expanded=False):
-            st.markdown(brief)
+        st.caption("完整 AI 研判纪要仍已落盘，界面默认不展开全文。")
 
 
 def render_ai_review_payload_page(

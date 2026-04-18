@@ -13,11 +13,9 @@ from src.app.repositories.config_repository import (
     save_experiment_config as repo_save_experiment_config,
 )
 from src.app.repositories.report_repository import (
-    load_candidate_snapshot as repo_load_candidate_snapshot,
     load_daily_bar as repo_load_daily_bar,
     load_dataset_summary as repo_load_dataset_summary,
     load_diagnostic_table as repo_load_diagnostic_table,
-    load_factor_explorer_snapshot as repo_load_factor_explorer_snapshot,
     load_feature_importance as repo_load_feature_importance,
     load_feature_panel as repo_load_feature_panel,
     load_latest_symbol_markdown as repo_load_latest_symbol_markdown,
@@ -26,20 +24,25 @@ from src.app.repositories.report_repository import (
     load_overlay_candidates as repo_load_overlay_candidates,
     load_overlay_inference_brief as repo_load_overlay_inference_brief,
     load_overlay_inference_candidates as repo_load_overlay_inference_candidates,
+    load_overlay_inference_shortlist as repo_load_overlay_inference_shortlist,
+    load_overlay_llm_bundle as repo_load_overlay_llm_bundle,
     load_overlay_inference_packet as repo_load_overlay_inference_packet,
     load_overlay_packet as repo_load_overlay_packet,
     load_portfolio as repo_load_portfolio,
     load_predictions as repo_load_predictions,
     load_stability as repo_load_stability,
-    load_watchlist_snapshot as repo_load_watchlist_snapshot,
 )
-from src.app.viewmodels.factor_explorer_vm import build_missing_rate_table, list_numeric_factor_columns
-from src.app.services.watchlist_service import build_watchlist_view
+from src.app.services.dashboard_snapshot_service import (
+    build_candidate_snapshot as snapshot_build_candidate_snapshot,
+    build_factor_explorer_snapshot as snapshot_build_factor_explorer_snapshot,
+    build_watchlist_base_frame as snapshot_build_watchlist_base_frame,
+    clear_snapshot_caches,
+    load_candidate_snapshot as snapshot_load_candidate_snapshot,
+    load_factor_explorer_snapshot as snapshot_load_factor_explorer_snapshot,
+    load_watchlist_snapshot as snapshot_load_watchlist_snapshot,
+)
 from src.db.dashboard_sync import (
-    sync_candidate_snapshot_artifact,
     sync_dashboard_artifacts,
-    sync_factor_explorer_snapshot_artifact,
-    sync_watchlist_snapshot_artifact,
 )
 from src.utils.data_source import active_data_source
 from src.utils.io import project_root
@@ -389,8 +392,10 @@ def clear_dashboard_data_caches() -> None:
     load_overlay_packet.cache_clear()
     load_overlay_brief.cache_clear()
     load_overlay_inference_candidates.cache_clear()
+    load_overlay_inference_shortlist.cache_clear()
     load_overlay_inference_packet.cache_clear()
     load_overlay_inference_brief.cache_clear()
+    load_overlay_llm_bundle.cache_clear()
     load_predictions.cache_clear()
     load_candidate_snapshot.cache_clear()
     build_candidate_snapshot.cache_clear()
@@ -402,9 +407,8 @@ def clear_dashboard_data_caches() -> None:
     load_diagnostic_table.cache_clear()
     load_stability.cache_clear()
     load_latest_symbol_markdown.cache_clear()
-    load_watchlist_snapshot.cache_clear()
     build_metrics_table.cache_clear()
-    build_watchlist_base_frame.cache_clear()
+    clear_snapshot_caches()
 
 
 @lru_cache(maxsize=1)
@@ -459,6 +463,11 @@ def load_overlay_inference_candidates() -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
+def load_overlay_inference_shortlist() -> str:
+    return repo_load_overlay_inference_shortlist(ROOT, data_source=ACTIVE_DATA_SOURCE)
+
+
+@lru_cache(maxsize=1)
 def load_overlay_inference_packet() -> dict:
     return repo_load_overlay_inference_packet(ROOT, data_source=ACTIVE_DATA_SOURCE)
 
@@ -468,82 +477,41 @@ def load_overlay_inference_brief() -> str:
     return repo_load_overlay_inference_brief(ROOT, data_source=ACTIVE_DATA_SOURCE)
 
 
+@lru_cache(maxsize=2)
+def load_overlay_llm_bundle(scope: str) -> dict[str, object]:
+    normalized_scope = "inference" if scope == "inference" else "historical"
+    packet = load_overlay_inference_packet() if normalized_scope == "inference" else load_overlay_packet()
+    return repo_load_overlay_llm_bundle(
+        ROOT,
+        data_source=ACTIVE_DATA_SOURCE,
+        scope=normalized_scope,
+        packet=packet,
+    )
+
+
 @lru_cache(maxsize=8)
 def load_predictions(model_name: str, split_name: str) -> pd.DataFrame:
     return repo_load_predictions(ROOT, data_source=ACTIVE_DATA_SOURCE, model_name=model_name, split_name=split_name)
 
 
 @lru_cache(maxsize=16)
-def load_candidate_snapshot(model_name: str, split_name: str) -> pd.DataFrame | None:
-    return repo_load_candidate_snapshot(ROOT, data_source=ACTIVE_DATA_SOURCE, model_name=model_name, split_name=split_name)
-
-
-@lru_cache(maxsize=1)
-def load_factor_explorer_snapshot() -> dict[str, object] | None:
-    return repo_load_factor_explorer_snapshot(ROOT, data_source=ACTIVE_DATA_SOURCE)
+def build_candidate_snapshot(model_name: str, split_name: str) -> pd.DataFrame:
+    return snapshot_build_candidate_snapshot(model_name, split_name)
 
 
 @lru_cache(maxsize=16)
-def build_candidate_snapshot(model_name: str, split_name: str) -> pd.DataFrame:
-    stored_snapshot = load_candidate_snapshot(model_name, split_name)
-    if stored_snapshot is not None:
-        return stored_snapshot.copy()
-
-    predictions = load_predictions(model_name, split_name)
-    from src.utils.prediction_snapshot import build_latest_prediction_snapshot
-
-    snapshot = build_latest_prediction_snapshot(predictions)
-    sync_candidate_snapshot_artifact(
-        root=ROOT,
-        data_source=ACTIVE_DATA_SOURCE,
-        model_name=model_name,
-        split_name=split_name,
-        predictions=predictions,
-        snapshot_frame=snapshot,
-    )
-    load_candidate_snapshot.cache_clear()
-    return snapshot
+def load_candidate_snapshot(model_name: str, split_name: str) -> pd.DataFrame | None:
+    return snapshot_load_candidate_snapshot(model_name, split_name)
 
 
 @lru_cache(maxsize=1)
 def build_factor_explorer_snapshot() -> dict[str, object]:
-    stored_snapshot = load_factor_explorer_snapshot()
-    if stored_snapshot is not None:
-        return dict(stored_snapshot)
+    return snapshot_build_factor_explorer_snapshot(tuple(sorted(FIELD_EXPLANATIONS.items())))
 
-    feature_panel = load_feature_panel()
-    numeric_columns = list_numeric_factor_columns(feature_panel)
-    if not numeric_columns:
-        return {
-            "available": False,
-            "latestDate": None,
-            "factorOptions": [],
-            "symbolOptions": [],
-            "crossSection": [],
-            "missingRates": [],
-        }
 
-    latest_date = feature_panel["trade_date"].max()
-    cross_section = feature_panel.loc[feature_panel["trade_date"] == latest_date].copy()
-    snapshot_payload: dict[str, object] = {
-        "available": True,
-        "latestDate": latest_date.isoformat() if isinstance(latest_date, pd.Timestamp) else str(latest_date),
-        "factorOptions": [
-            {"key": column, "label": column, "description": FIELD_EXPLANATIONS.get(column, "")}
-            for column in numeric_columns
-        ],
-        "symbolOptions": cross_section["ts_code"].sort_values().tolist(),
-        "crossSection": cross_section.to_dict(orient="records"),
-        "missingRates": build_missing_rate_table(feature_panel, numeric_columns).to_dict(orient="records"),
-    }
-    sync_factor_explorer_snapshot_artifact(
-        root=ROOT,
-        data_source=ACTIVE_DATA_SOURCE,
-        feature_panel=feature_panel,
-        snapshot_payload=snapshot_payload,
-    )
-    load_factor_explorer_snapshot.cache_clear()
-    return snapshot_payload
+@lru_cache(maxsize=1)
+def load_factor_explorer_snapshot() -> dict[str, object] | None:
+    return snapshot_load_factor_explorer_snapshot()
 
 
 @lru_cache(maxsize=8)
@@ -583,11 +551,6 @@ def load_latest_symbol_markdown(symbol: str, note_kind: str) -> dict[str, str]:
 
 
 @lru_cache(maxsize=1)
-def load_watchlist_snapshot() -> pd.DataFrame | None:
-    return repo_load_watchlist_snapshot(ROOT, data_source=ACTIVE_DATA_SOURCE)
-
-
-@lru_cache(maxsize=1)
 def build_metrics_table() -> pd.DataFrame:
     rows: list[dict] = []
     for model_name in MODEL_NAMES:
@@ -602,28 +565,9 @@ def build_metrics_table() -> pd.DataFrame:
 
 @lru_cache(maxsize=1)
 def build_watchlist_base_frame() -> pd.DataFrame:
-    watchlist_snapshot = load_watchlist_snapshot()
-    if watchlist_snapshot is not None:
-        return watchlist_snapshot.copy()
+    return snapshot_build_watchlist_base_frame()
 
-    watchlist_config = load_watchlist_config()
-    frame = build_watchlist_view(
-        root=ROOT,
-        data_source=ACTIVE_DATA_SOURCE,
-        watchlist_config=watchlist_config,
-        daily_bar=load_daily_bar(),
-        ridge_predictions=load_predictions("ridge", "test"),
-        lgbm_predictions=load_predictions("lgbm", "test"),
-        ensemble_predictions=load_predictions("ensemble", "test"),
-        overlay_candidates=load_overlay_candidates(),
-        ensemble_inference_predictions=load_predictions("ensemble", "inference"),
-        overlay_inference_candidates=load_overlay_inference_candidates(),
-    )
-    sync_watchlist_snapshot_artifact(
-        root=ROOT,
-        data_source=ACTIVE_DATA_SOURCE,
-        watchlist_config=watchlist_config,
-        snapshot_frame=frame,
-    )
-    load_watchlist_snapshot.cache_clear()
-    return frame
+
+@lru_cache(maxsize=1)
+def load_watchlist_snapshot() -> pd.DataFrame | None:
+    return snapshot_load_watchlist_snapshot()

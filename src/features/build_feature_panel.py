@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
+from src.app.repositories.report_repository import save_binary_dataset
 from src.data.universe import load_universe
 from src.features.alpha_factors import add_price_factors
 from src.features.labels import add_forward_returns
 from src.features.quality_factors import add_valuation_factors
 from src.features.risk_factors import add_risk_factors
-from src.utils.data_source import active_data_source, source_prefixed_path, source_or_canonical_path
-from src.utils.io import project_root, save_parquet
+from src.utils.data_source import active_data_source, normalize_data_source, source_or_canonical_path
+from src.utils.io import project_root
 from src.utils.logger import configure_logging
 
 logger = configure_logging()
@@ -140,30 +143,70 @@ def build_feature_and_label_panels(daily_bar: pd.DataFrame) -> tuple[pd.DataFram
     return feature_panel, label_panel
 
 
-def run() -> None:
-    root = project_root()
-    data_source = active_data_source()
-    daily_bar_path = source_or_canonical_path(root / "data" / "staging", "daily_bar.parquet", data_source)
+def build_feature_label_artifacts(
+    root: Path | None = None,
+    *,
+    data_source: str | None = None,
+) -> dict[str, object]:
+    resolved_root = root or project_root()
+    resolved_data_source = normalize_data_source(data_source or active_data_source())
+    daily_bar_path = source_or_canonical_path(resolved_root / "data" / "staging", "daily_bar.parquet", resolved_data_source)
     if not daily_bar_path.exists():
         raise FileNotFoundError(f"Missing {daily_bar_path}. Run the downloader first.")
 
     daily_bar = pd.read_parquet(daily_bar_path)
     feature_panel, label_panel = build_feature_and_label_panels(daily_bar)
 
-    feature_dir = root / "data" / "features"
-    label_dir = root / "data" / "labels"
-    save_parquet(feature_panel, source_prefixed_path(feature_dir, "feature_panel.parquet", data_source))
-    save_parquet(label_panel, source_prefixed_path(label_dir, "label_panel.parquet", data_source))
-    save_parquet(feature_panel, feature_dir / "feature_panel.parquet")
-    save_parquet(label_panel, label_dir / "label_panel.parquet")
+    feature_path = save_binary_dataset(
+        resolved_root,
+        data_source=resolved_data_source,
+        directory="data/features",
+        filename="feature_panel.parquet",
+        artifact_name="feature_panel",
+        frame=feature_panel,
+    )
+    label_path = save_binary_dataset(
+        resolved_root,
+        data_source=resolved_data_source,
+        directory="data/labels",
+        filename="label_panel.parquet",
+        artifact_name="label_panel",
+        frame=label_panel,
+    )
 
-    from src.db.dashboard_sync import sync_dashboard_artifacts
+    from src.db.dashboard_sync import (
+        sync_dataset_summary_artifact,
+        sync_factor_explorer_snapshot_artifact,
+    )
 
-    logger.info(f"Data source: {data_source}")
+    dataset_summary = sync_dataset_summary_artifact(root=resolved_root, data_source=resolved_data_source)
+    factor_snapshot = sync_factor_explorer_snapshot_artifact(
+        root=resolved_root,
+        data_source=resolved_data_source,
+        feature_panel=feature_panel,
+    )
+    logger.info(f"Data source: {resolved_data_source}")
     logger.info(f"Feature panel rows: {len(feature_panel):,}")
     logger.info(f"Label panel rows: {len(label_panel):,}")
-    summary = sync_dashboard_artifacts(root=root, data_source=data_source)
-    logger.info(summary.message if summary.ok else f"Dashboard DB sync failed: {summary.message}")
+    logger.info(dataset_summary.message if dataset_summary.ok else f"Dataset summary sync failed: {dataset_summary.message}")
+    logger.info(factor_snapshot.message if factor_snapshot.ok else f"Factor snapshot sync failed: {factor_snapshot.message}")
+    return {
+        "data_source": resolved_data_source,
+        "feature_rows": int(len(feature_panel)),
+        "label_rows": int(len(label_panel)),
+        "feature_path": str(feature_path),
+        "label_path": str(label_path),
+        "dataset_summary_ok": bool(dataset_summary.ok),
+        "dataset_summary_message": dataset_summary.message,
+        "factor_snapshot_ok": bool(factor_snapshot.ok),
+        "factor_snapshot_message": factor_snapshot.message,
+    }
+
+
+def run() -> None:
+    summary = build_feature_label_artifacts()
+    logger.info(f"Feature output: {summary['feature_path']}")
+    logger.info(f"Label output: {summary['label_path']}")
 
 
 if __name__ == "__main__":

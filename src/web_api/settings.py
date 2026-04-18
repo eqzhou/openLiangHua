@@ -35,6 +35,7 @@ class ApiSettings:
     db_host: str
     db_port: int
     db_name: str
+    db_schema: str
     db_user: str
     db_password: str
     db_connect_timeout: int
@@ -55,6 +56,7 @@ def get_api_settings() -> ApiSettings:
         db_host=database.host,
         db_port=database.port,
         db_name=database.name,
+        db_schema=database.schema,
         db_user=database.user,
         db_password=database.password,
         db_connect_timeout=database.connect_timeout,

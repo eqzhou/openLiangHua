@@ -23,6 +23,7 @@ import { SegmentedControl } from '../components/SegmentedControl'
 import { SpotlightCard } from '../components/SpotlightCard'
 import { SupportPanel } from '../components/SupportPanel'
 import { useToast } from '../components/ToastProvider'
+import { WorkspaceHero } from '../components/WorkspaceHero'
 import { candidateHistoryClient, candidatesPageClient, candidatesSummaryClient } from '../facades/dashboardPageClient'
 import { usePageSearchState } from '../facades/usePageSearchState'
 import { formatDate, formatPercent, formatValue, recordToFieldRows } from '../lib/format'
@@ -50,8 +51,8 @@ const PICK_COLUMN_LABELS = {
 const FIELD_COLUMNS = ['field', 'value']
 
 const CANDIDATES_VIEW_PRESETS = [
-  { key: 'decision', label: '决策视图', columns: ['name', 'rank', 'score', 'rank_pct', 'ret_t1_t10', 'pct_chg'] },
-  { key: 'momentum', label: '动量视图', columns: ['name', 'rank', 'pct_chg', 'mom_20', 'close_to_ma_20', 'ret_t1_t10'] },
+  { key: 'decision', label: '决策', columns: ['name', 'rank', 'score', 'rank_pct', 'ret_t1_t10', 'pct_chg'] },
+  { key: 'momentum', label: '动量', columns: ['name', 'rank', 'pct_chg', 'mom_20', 'close_to_ma_20', 'ret_t1_t10'] },
 ]
 
 function buildOptionLabel(symbol: string, records: JsonRecord[]): string {
@@ -78,7 +79,7 @@ function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim()
   }
-  return '请稍后重试。'
+  return '操作失败，请稍后再试。'
 }
 
 export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
@@ -157,6 +158,15 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
     [candidateCount, latestPicks, params.topN, selectedPick, summaryQuery.data?.latestDate, summaryQuery.data?.modelName, summaryQuery.data?.splitName, summaryQuery.data?.topN],
   )
 
+  const candidatesHeroBadges = (
+    <>
+      <Badge tone="brand">{String(summaryQuery.data?.modelName ?? params.model).toUpperCase()}</Badge>
+      <Badge tone="default">{String(summaryQuery.data?.splitName ?? params.split).toUpperCase()}</Badge>
+      <Badge tone={positiveCount > 0 ? 'good' : 'warn'}>{`${positiveCount} 只正收益样本`}</Badge>
+      <Badge tone="brand">{`Top ${summaryQuery.data?.topN ?? params.topN}`}</Badge>
+    </>
+  )
+
   const openDrawer = (symbol: string) => {
     if (!symbol) {
       return
@@ -204,19 +214,22 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
 
   return (
     <div className="page-stack">
-      <Panel
-        title="候选股票"
-        subtitle={
-          summaryQuery.data?.latestDate
-            ? `当前查看 ${String(summaryQuery.data.modelName).toUpperCase()} 在 ${String(summaryQuery.data.splitName).toUpperCase()} 截面的候选池，信号日期 ${formatDate(summaryQuery.data.latestDate)}。`
-            : '先看候选池，再按需展开单票历史。'
-        }
-        tone="warm"
-        className="panel--summary-surface"
-      >
+      <WorkspaceHero
+        title="候选股"
+        badges={candidatesHeroBadges}
+      />
+
+      <div className="metric-grid metric-grid--four">
+        <MetricCard label="候选池数量" value={candidateCount} />
+        <MetricCard label="正收益样本" value={positiveCount} tone={positiveCount > 0 ? 'good' : 'default'} />
+        <MetricCard label="当前模型" value={String(summaryQuery.data?.modelName ?? params.model).toUpperCase()} />
+        <MetricCard label="当前分段" value={String(summaryQuery.data?.splitName ?? params.split).toUpperCase()} />
+      </div>
+
+      <Panel title="筛选" subtitle={summaryQuery.data?.latestDate ? `${String(summaryQuery.data.modelName).toUpperCase()} / ${String(summaryQuery.data.splitName).toUpperCase()} / ${formatDate(summaryQuery.data.latestDate)}` : undefined} tone="warm" className="panel--summary-surface">
         <QueryNotice isLoading={summaryQuery.isLoading} error={summaryQuery.error} />
 
-        <SectionBlock title="先看候选池概况" description="先看数量、模型和正收益样本。" tone="emphasis">
+        <SectionBlock title="概览" tone="emphasis">
           <div className="metric-grid metric-grid--four">
             <MetricCard label="候选池数量" value={candidateCount} />
             <MetricCard label="模型" value={String(summaryQuery.data?.modelName ?? '-').toUpperCase()} />
@@ -227,7 +240,7 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
 
         <ContextStrip items={candidatesContextItems} />
 
-        <PageFilterBar title="切换候选池视角" description="这里只控制候选摘要。">
+        <PageFilterBar title="切换候选池视角">
           <ControlGrid variant="quad">
             <ControlField label="结果模型">
               <select value={params.model} onChange={(event) => updateParams({ model: event.target.value })}>
@@ -250,7 +263,7 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
             <ControlField label="候选数量">
               <input type="number" min={3} max={30} value={params.topN} onChange={(event) => updateParams({ topN: Number(event.target.value) || 10 })} />
             </ControlField>
-            <ControlField label="查看股票">
+            <ControlField label="查看候选股">
               <select value={selectedSymbol ?? ''} onChange={(event) => updateParams({ symbol: event.target.value })}>
                 {symbolOptions.map((symbol) => (
                   <option key={symbol} value={symbol}>
@@ -263,7 +276,7 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
         </PageFilterBar>
       </Panel>
 
-      <Panel title="候选池主表" subtitle="主表只负责总列表和切换。" tone="calm" className="panel--table-surface">
+      <Panel title="列表" tone="calm" className="panel--table-surface">
         <DataTable
           rows={latestPicks}
           columns={PICKS_COLUMNS}
@@ -272,7 +285,7 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
           viewPresets={CANDIDATES_VIEW_PRESETS}
           defaultPresetKey="decision"
           loading={summaryQuery.isLoading}
-          emptyText="暂无候选股票数据"
+          emptyText="暂无候选股数据"
           stickyFirstColumn
           getRowId={(row) => String(row.ts_code ?? '')}
           selectedRowId={selectedSymbol ?? null}
@@ -282,14 +295,42 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
       </Panel>
 
       <div className="split-layout">
-        <SupportPanel title="当前候选标的" subtitle="先在主表选中，再看单票摘要。">
+        <SupportPanel
+          title="当前股票"
+          mobileCard={{
+            title: String(selectedPick?.name ?? '暂无候选股'),
+            subtitle: String(selectedPick?.action_hint ?? '先从候选池选择一只股票。'),
+            badges: selectedPick ? (
+              <div className="badge-row">
+                <Badge tone="brand">{String(selectedPick.ts_code ?? '')}</Badge>
+                <Badge>{formatDate(summaryQuery.data?.latestDate)}</Badge>
+              </div>
+            ) : null,
+            body: selectedPick ? (
+              <PropertyGrid
+                items={[
+                  { label: '当前排名', value: formatValue(selectedPick.rank ?? '-') },
+                  { label: '综合分数', value: formatValue(selectedPick.score ?? '-') },
+                  { label: '未来10日收益', value: formatPercent(selectedPick.ret_t1_t10 ?? '-') },
+                  { label: '行业', value: formatValue(selectedPick.industry) },
+                ]}
+              />
+            ) : null,
+            actions: selectedPick ? (
+              <div className="inline-actions inline-actions--compact">
+                <button type="button" className="button button--primary" onClick={() => openDrawer(String(selectedPick.ts_code ?? ''))}>
+                  查看详情
+                </button>
+                <button type="button" className="button button--ghost" onClick={() => openAiReview(String(selectedPick.ts_code ?? ''))}>
+                  AI 分析
+                </button>
+              </div>
+            ) : null,
+          }}
+        >
           {selectedPick ? (
             <div className="section-stack">
-              <SectionBlock
-                title="核心摘要"
-                description="先承接主表里的排名和总分。"
-                tone="emphasis"
-              >
+              <SectionBlock title="核心概览" tone="emphasis">
                 <SpotlightCard
                   title={String(selectedPick.name ?? '-')}
                   meta={String(selectedPick.ts_code ?? '')}
@@ -301,7 +342,7 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
                   actions={
                     <div className="inline-actions inline-actions--compact">
                       <button type="button" className="button button--ghost button--small" onClick={() => openDrawer(String(selectedPick.ts_code ?? ''))}>
-                        打开详情抽屉
+                        查看详情
                       </button>
                     </div>
                   }
@@ -314,7 +355,7 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
                 />
               </SectionBlock>
 
-              <SectionBlock title="交易背景" description="行业、涨跌和动量后置。" collapsible defaultExpanded={false}>
+              <SectionBlock title="交易背景" collapsible defaultExpanded={false}>
                 <PropertyGrid
                   items={[
                     { label: '行业', value: formatValue(selectedPick.industry) },
@@ -326,15 +367,22 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
               </SectionBlock>
             </div>
           ) : (
-            <div className="empty-state">暂无候选详情</div>
+            <div className="empty-state">暂无候选股</div>
           )}
         </SupportPanel>
 
-        <SupportPanel title="评分历史" subtitle="评分历史按当前选中标的单独加载。">
+        <SupportPanel
+          title="历史"
+          mobileCard={{
+            title: '评分历史',
+            subtitle: activeScoreView?.label,
+            body: <LineChartCard data={scoreHistory} xKey="trade_date" lineKeys={activeScoreView?.lineKeys ?? scoreKeys} title="评分曲线" />,
+          }}
+        >
           <QueryNotice isLoading={historyQuery.isLoading} error={historyQuery.error} />
           {scoreViewOptions.length ? (
             <SegmentedControl
-              label="切换评分视图"
+              label="切换评分预设"
               value={activeScoreView?.key ?? scoreViewOptions[0].key}
               options={scoreViewOptions.map((item) => ({ key: item.key, label: item.label }))}
               onChange={setScoreView}
@@ -345,15 +393,23 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
             xKey="trade_date"
             lineKeys={activeScoreView?.lineKeys ?? scoreKeys}
             title="候选评分曲线"
-            subtitle={activeScoreView?.subtitle ?? '暂无历史曲线'}
+            subtitle={activeScoreView?.label}
           />
         </SupportPanel>
       </div>
 
       <DetailDrawer
         open={Boolean(drawerRecord)}
-        title={drawerRecord ? buildOptionLabel(String(drawerRecord.ts_code ?? ''), latestPicks) : '候选详情'}
-        subtitle={drawerRecord ? String(drawerRecord.action_hint ?? '查看当前候选的完整字段。') : undefined}
+        title={drawerRecord ? buildOptionLabel(String(drawerRecord.ts_code ?? ''), latestPicks) : '候选股详情'}
+        subtitle={drawerRecord ? String(drawerRecord.action_hint ?? '') : undefined}
+        status={
+          drawerRecord ? (
+            <div className="badge-row">
+              <Badge tone="brand">候选池</Badge>
+              <Badge>{formatDate(summaryQuery.data?.latestDate)}</Badge>
+            </div>
+          ) : null
+        }
         meta={
           drawerRecord ? (
             <div className="badge-row">
@@ -369,7 +425,7 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
             <DetailSummarySection
               title={String(drawerRecord.name ?? '-')}
               meta={String(drawerRecord.ts_code ?? '')}
-              subtitle={String(drawerRecord.action_hint ?? '查看当前候选的核心结论。')}
+              subtitle={String(drawerRecord.action_hint ?? '')}
               badges={[
                 { label: '候选池', tone: 'brand' },
                 { label: formatDate(summaryQuery.data?.latestDate) },
@@ -389,14 +445,14 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
 
             <DrawerQuickActions
               title="快捷操作"
-              description="需要时再执行复制、分享和跳转。"
+              meta={String(drawerRecord.ts_code ?? '')}
               primaryActions={[
                 { key: 'copy-symbol', label: '复制股票代码', onClick: () => copySymbol(String(drawerRecord.ts_code ?? '')), tone: 'primary' },
                 { key: 'copy-view', label: '复制当前视图', onClick: copyCurrentViewLink },
               ]}
               secondaryActions={[
-                { key: 'open-ai-review', label: '跳到 AI 研判', onClick: () => openAiReview(String(drawerRecord.ts_code ?? '')), tone: 'ghost' },
-                { key: 'open-watchlist', label: '跳到观察持仓', onClick: () => openWatchlistPage(String(drawerRecord.ts_code ?? '')), tone: 'ghost' },
+                { key: 'open-ai-review', label: '查看 AI 分析', onClick: () => openAiReview(String(drawerRecord.ts_code ?? '')), tone: 'ghost' },
+                { key: 'open-watchlist', label: '查看持仓', onClick: () => openWatchlistPage(String(drawerRecord.ts_code ?? '')), tone: 'ghost' },
               ]}
             />
 
@@ -409,7 +465,7 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
                 stickyFirstColumn
                 enableColumnManager={false}
                 density="comfortable"
-                emptyText="暂无候选详情字段"
+                emptyText="暂无候选股字段"
               />
             </details>
           </div>

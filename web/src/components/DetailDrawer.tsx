@@ -4,12 +4,15 @@ interface DetailDrawerProps extends PropsWithChildren {
   open: boolean
   title: string
   subtitle?: string
+  eyebrow?: string
   meta?: ReactNode
+  status?: ReactNode
   footer?: ReactNode
+  className?: string
   onClose: () => void
 }
 
-export function DetailDrawer({ open, title, subtitle, meta, footer, onClose, children }: DetailDrawerProps) {
+export function DetailDrawer({ open, title, subtitle, eyebrow = 'Detail Workspace', meta, status, footer, className, onClose, children }: DetailDrawerProps) {
   const titleId = useId()
   const subtitleId = useId()
 
@@ -36,7 +39,7 @@ export function DetailDrawer({ open, title, subtitle, meta, footer, onClose, chi
     <>
       <div className="drawer-backdrop" onClick={onClose} aria-hidden="true" />
       <aside
-        className="detail-drawer"
+        className={['detail-drawer', className].filter(Boolean).join(' ')}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -44,6 +47,10 @@ export function DetailDrawer({ open, title, subtitle, meta, footer, onClose, chi
       >
         <header className="detail-drawer__header">
           <div className="detail-drawer__title-group">
+            <div className="detail-drawer__topline">
+              {eyebrow ? <p className="detail-drawer__eyebrow">{eyebrow}</p> : null}
+              {status ? <div className="detail-drawer__status">{status}</div> : null}
+            </div>
             <h2 id={titleId} className="detail-drawer__title">
               {title}
             </h2>
