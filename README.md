@@ -8,11 +8,14 @@ It is designed for the workflow:
 3. Train baseline models such as Ridge and LightGBM.
 4. Review rank IC, top-N forward returns, and a simple daily portfolio curve.
 
+For the current release-facing operator workflow, start with `docs/USER_MANUAL.md`.
+
 ## Durable Docs
 
 If a chat or terminal session gets interrupted, start with these files instead of reconstructing context from scratch:
 
 - `docs/README.md`
+- `docs/USER_MANUAL.md`
 - `docs/PROJECT_ARCHITECTURE.md`
 - `docs/SYSTEM_ARCHITECTURE_BLUEPRINT_2026-04-04.md`
 - `docs/MIGRATION_PLAN_2026-04-04.md`

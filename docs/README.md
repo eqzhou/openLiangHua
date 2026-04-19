@@ -3,6 +3,7 @@
 These files are the durable handoff layer for this workspace. When a chat is interrupted, start here instead of reconstructing context from memory.
 
 - `PROJECT_ARCHITECTURE.md`: what the project does, how data flows, which modules own which responsibilities, and what the dashboard reads.
+- `USER_MANUAL.md`: current Chinese user manual for the release-facing React + FastAPI system, written only against verified implemented features.
 - `SYSTEM_ARCHITECTURE_BLUEPRINT_2026-04-04.md`: the current approved architecture direction, target boundaries, and the decision to continue migration instead of rewriting.
 - `MIGRATION_PLAN_2026-04-04.md`: the current staged migration plan, including what Phase 1 already moved.
 - `APP_ARCHITECTURE_PROPOSAL_2026-04-02.md`: older frontend/application-layer diagnosis; keep only as historical reference.

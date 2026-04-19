@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { apiGet, apiPost } from '../api/client'
@@ -96,7 +96,7 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
     },
   })
 
-  const payload = useMemo(() => dataQuery.data, [dataQuery.data])
+  const payload = dataQuery.data
   const dailyBar = payload?.dailyBar ?? { exists: false, rowCount: 0, symbolCount: 0 }
   const featurePanel = payload?.featurePanel ?? { exists: false, rowCount: 0, symbolCount: 0 }
   const labelPanel = payload?.labelPanel ?? { exists: false, rowCount: 0, symbolCount: 0 }

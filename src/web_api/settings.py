@@ -63,8 +63,8 @@ def get_api_settings() -> ApiSettings:
         cors_origins=_env_csv(
             "APP_CORS_ORIGINS",
             (
-                "http://127.0.0.1:5173",
-                "http://localhost:5173",
+                "http://127.0.0.1:5174",
+                "http://localhost:5174",
             ),
         ),
         auth_cookie_name=_env_text("APP_AUTH_COOKIE_NAME", "openlianghua_session"),
