@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import pandas as pd
 
 from src.app.facades.dashboard_facade import (
+    _build_home_alerts,
     apply_realtime_to_watchlist_payload,
     get_ai_review_detail_payload,
     get_ai_review_summary_payload,
@@ -113,6 +114,29 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertIn("aiReview", payload)
         self.assertIn("shortlistMarkdown", payload["aiReview"])
         self.assertIn("alerts", payload)
+
+    def test_build_home_alerts_ignores_missing_powershell_and_recent_market_snapshot(self) -> None:
+        alerts = _build_home_alerts(
+            service_payload={
+                "effective_state": "unknown",
+                "status_label_display": "状态脚本不可用",
+                "realtime_snapshot": {
+                    "available": True,
+                    "snapshot_label_display": "最近交易日盘中快照",
+                    "is_today": False,
+                    "is_current_market_day": True,
+                },
+            },
+            watchlist_payload={
+                "overview": {
+                    "unrealizedPnl": 0,
+                }
+            },
+        )
+
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["tone"], "good")
+        self.assertIn("主操作链路当前正常", alerts[0]["title"])
 
     def test_candidates_summary_payload_prefers_precomputed_snapshot(self) -> None:
         candidate_snapshot = pd.DataFrame(
@@ -297,6 +321,36 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertTrue(snapshot["available"])
         self.assertEqual(snapshot["snapshot_bucket"], "post_close")
         self.assertEqual(snapshot["snapshot_label_display"], "今日盘后快照")
+
+    def test_service_payload_marks_after_close_latest_snapshot_as_recent_post_close(self) -> None:
+        fake_store = Mock()
+        fake_store.get_latest_snapshot_summary.return_value = {
+            "trade_date": "2026-04-03",
+            "snapshot_bucket": "latest",
+            "source": "sina-quote",
+            "requested_symbol_count": 9,
+            "success_symbol_count": 9,
+            "failed_symbols": [],
+            "error_message": "",
+            "fetched_at": "2026-04-03T15:05:00+08:00",
+        }
+        daily_bar = pd.DataFrame(
+            [
+                {"trade_date": "2026-04-03", "ts_code": "000001.SZ", "close": 10.0},
+            ]
+        )
+
+        with (
+            patch("src.app.facades.dashboard_facade.get_realtime_quote_store", return_value=fake_store),
+            patch("src.app.facades.dashboard_facade.load_daily_bar", return_value=daily_bar),
+            patch("src.app.facades.dashboard_facade.pd.Timestamp.now", return_value=pd.Timestamp("2026-04-05 10:00:00+08:00")),
+        ):
+            payload = get_service_payload()
+
+        snapshot = payload["realtime_snapshot"]
+        self.assertEqual(snapshot["snapshot_bucket"], "latest")
+        self.assertEqual(snapshot["snapshot_label_display"], "最近交易日盘后快照")
+        self.assertTrue(snapshot["is_current_market_day"])
 
     def test_watchlist_payload_includes_refresh_context(self) -> None:
         payload = get_watchlist_payload()

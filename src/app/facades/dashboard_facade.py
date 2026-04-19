@@ -20,7 +20,6 @@ from src.app.viewmodels.model_backtest_vm import build_monthly_summary, normaliz
 from src.app.viewmodels.overview_vm import build_equity_curve_frame, build_model_comparison_frame
 from src.app.services.data_management_service import build_data_management_payload
 from src.app.services.dashboard_data_service import (
-    ACTIVE_DATA_SOURCE,
     FIELD_EXPLANATIONS,
     LABEL_OPTIONS,
     METRIC_EXPLANATIONS,
@@ -36,6 +35,7 @@ from src.app.services.dashboard_data_service import (
     build_watchlist_base_frame,
     clear_dashboard_data_caches,
     list_available_actions,
+    load_daily_bar,
     load_diagnostic_table,
     load_dataset_summary,
     load_experiment_config,
@@ -104,8 +104,8 @@ def _frame_records(frame: pd.DataFrame, *, limit: int | None = None) -> list[dic
 
 def clear_dashboard_caches() -> None:
     clear_dashboard_data_caches()
-    _get_home_payload_cached.cache_clear()
-    _get_service_payload_cached.cache_clear()
+    getattr(_get_home_payload_cached, "cache_clear", lambda: None)()
+    getattr(_get_service_payload_cached, "cache_clear", lambda: None)()
 
 
 def get_bootstrap_payload() -> dict[str, Any]:
@@ -208,7 +208,7 @@ def _build_home_alerts(
 
     effective_state = str(service_payload.get("effective_state", "") or "")
     service_label = str(service_payload.get("status_label_display", "未知") or "未知")
-    if effective_state and effective_state != "running":
+    if effective_state and effective_state != "running" and service_label != "状态脚本不可用":
         alerts.append(
             {
                 "tone": "warn",
@@ -227,7 +227,7 @@ def _build_home_alerts(
                 "detail": "首页会先展示落库数据。盘中需要更实时的价格时，再去持仓页手动刷新行情。",
             }
         )
-    elif not bool(realtime_snapshot.get("is_today")):
+    elif not bool(realtime_snapshot.get("is_current_market_day")):
         alerts.append(
             {
                 "tone": "warn",
@@ -305,7 +305,6 @@ def _get_home_watchlist_payload() -> dict[str, Any]:
     }
 
 
-@lru_cache(maxsize=1)
 def _get_home_payload_cached() -> dict[str, Any]:
     shell_payload = get_shell_payload()
     overview_payload = get_overview_payload("test")
@@ -703,11 +702,18 @@ def _decorate_realtime_status(status: dict[str, Any]) -> dict[str, Any]:
     payload = dict(status or {})
     snapshot_bucket = str(payload.get("snapshot_bucket", "") or "")
     trade_date_value = payload.get("trade_date")
-    trade_date = pd.Timestamp(trade_date_value).date() if trade_date_value else None
-    today = pd.Timestamp.now(tz="Asia/Shanghai").date()
-    is_today = trade_date == today if trade_date is not None else False
-    payload["snapshot_label_display"] = _realtime_snapshot_label(snapshot_bucket, is_today=is_today, available=bool(payload.get("available")))
+    fetched_at_value = payload.get("fetched_at")
+    trade_date = pd.Timestamp(trade_date_value) if trade_date_value else None
+    fetched_at = pd.Timestamp(fetched_at_value) if fetched_at_value else None
+    snapshot_label, is_today, is_current_market_day = _resolve_realtime_snapshot_display(
+        snapshot_bucket=snapshot_bucket,
+        trade_date=trade_date,
+        fetched_at=fetched_at,
+        available=bool(payload.get("available")),
+    )
+    payload["snapshot_label_display"] = snapshot_label
     payload["is_today"] = is_today
+    payload["is_current_market_day"] = is_current_market_day
     return _json_ready(payload)
 
 
@@ -1101,6 +1107,72 @@ def _realtime_snapshot_label(snapshot_bucket: str, *, is_today: bool, available:
     return "数据库快照"
 
 
+def _latest_market_reference_date() -> pd.Timestamp | None:
+    daily_bar = load_daily_bar()
+    if daily_bar.empty or "trade_date" not in daily_bar.columns:
+        return None
+    latest_trade_date = pd.to_datetime(daily_bar["trade_date"], errors="coerce").max()
+    if pd.isna(latest_trade_date):
+        return None
+    return pd.Timestamp(latest_trade_date).normalize()
+
+
+def _is_post_close_like_snapshot(
+    *,
+    snapshot_bucket: str,
+    trade_date: pd.Timestamp | None,
+    fetched_at: pd.Timestamp | None,
+) -> bool:
+    if snapshot_bucket == "post_close":
+        return True
+    if snapshot_bucket != "latest" or trade_date is None or fetched_at is None:
+        return False
+
+    normalized_trade_date = pd.Timestamp(trade_date).date()
+    fetched_timestamp = pd.Timestamp(fetched_at)
+    if fetched_timestamp.date() < normalized_trade_date:
+        return False
+    return (fetched_timestamp.hour, fetched_timestamp.minute, fetched_timestamp.second) >= (15, 0, 0)
+
+
+def _resolve_realtime_snapshot_display(
+    *,
+    snapshot_bucket: str,
+    trade_date: pd.Timestamp | None,
+    fetched_at: pd.Timestamp | None,
+    available: bool,
+) -> tuple[str, bool, bool]:
+    if trade_date is None:
+        return _realtime_snapshot_label(snapshot_bucket, is_today=False, available=available), False, False
+
+    normalized_trade_date = pd.Timestamp(trade_date).date()
+    today = pd.Timestamp.now(tz="Asia/Shanghai").date()
+    market_reference_date = _latest_market_reference_date()
+    is_today = normalized_trade_date == today
+    is_current_market_day = market_reference_date is not None and normalized_trade_date == market_reference_date.date()
+    is_post_close_like = _is_post_close_like_snapshot(
+        snapshot_bucket=snapshot_bucket,
+        trade_date=trade_date,
+        fetched_at=fetched_at,
+    )
+
+    if not available:
+        return "暂无快照", is_today, bool(is_current_market_day)
+    if is_post_close_like:
+        if is_today:
+            return "今日盘后快照", is_today, bool(is_current_market_day)
+        if is_current_market_day:
+            return "最近交易日盘后快照", is_today, True
+        return "盘后快照", is_today, False
+    if snapshot_bucket == "latest":
+        if is_today:
+            return "最新盘中快照", is_today, bool(is_current_market_day)
+        if is_current_market_day:
+            return "最近交易日盘中快照", is_today, True
+        return "历史盘中快照", is_today, False
+    return "数据库快照", is_today, bool(is_current_market_day)
+
+
 def _get_realtime_snapshot_summary() -> dict[str, Any]:
     summary: dict[str, Any] = {
         "available": False,
@@ -1115,6 +1187,7 @@ def _get_realtime_snapshot_summary() -> dict[str, Any]:
         "error_message": "",
         "fetched_at": "",
         "is_today": False,
+        "is_current_market_day": False,
         "age_days": None,
     }
     try:
@@ -1128,18 +1201,25 @@ def _get_realtime_snapshot_summary() -> dict[str, Any]:
         return summary
 
     trade_date_value = latest.get("trade_date")
+    fetched_at_value = latest.get("fetched_at")
     trade_date = pd.Timestamp(trade_date_value).date() if trade_date_value else None
-    today = pd.Timestamp.now(tz="Asia/Shanghai").date()
-    is_today = trade_date == today if trade_date is not None else False
-    age_days = (today - trade_date).days if trade_date is not None else None
+    current_day = pd.Timestamp.now(tz="Asia/Shanghai").date()
+    age_days = (current_day - trade_date).days if trade_date is not None else None
     snapshot_bucket = str(latest.get("snapshot_bucket", ""))
+    snapshot_label, is_today, is_current_market_day = _resolve_realtime_snapshot_display(
+        snapshot_bucket=snapshot_bucket,
+        trade_date=pd.Timestamp(trade_date) if trade_date is not None else None,
+        fetched_at=pd.Timestamp(fetched_at_value) if fetched_at_value else None,
+        available=True,
+    )
 
     summary.update(latest)
     summary["available"] = True
     summary["trade_date"] = str(trade_date) if trade_date is not None else ""
     summary["is_today"] = is_today
+    summary["is_current_market_day"] = is_current_market_day
     summary["age_days"] = age_days
-    summary["snapshot_label_display"] = _realtime_snapshot_label(snapshot_bucket, is_today=is_today, available=True)
+    summary["snapshot_label_display"] = snapshot_label
     summary["served_from"] = "database"
     return _json_ready(summary)
 

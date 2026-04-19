@@ -11,7 +11,12 @@ from src.app.repositories.report_repository import (
     load_feature_panel,
     load_label_panel,
 )
-from src.utils.data_source import active_data_source, normalize_data_source, source_or_canonical_path
+from src.utils.data_source import (
+    active_data_source,
+    detect_materialized_data_source,
+    normalize_data_source,
+    source_or_canonical_path,
+)
 from src.utils.io import project_root
 
 
@@ -69,7 +74,9 @@ def build_data_management_payload(
     include_sensitive: bool = True,
 ) -> dict[str, object]:
     resolved_root = root or project_root()
-    resolved_target_source = normalize_data_source(target_source or active_data_source())
+    configured_source = normalize_data_source(target_source or active_data_source())
+    materialized_source = detect_materialized_data_source(resolved_root, configured_source)
+    resolved_target_source = materialized_source
     env_exists, token_configured = _env_token_status(resolved_root)
 
     daily_bar_path = source_or_canonical_path(resolved_root / "data" / "staging", "daily_bar.parquet", resolved_target_source)
@@ -84,6 +91,8 @@ def build_data_management_payload(
     return {
         "targetSource": resolved_target_source,
         "activeDataSource": resolved_target_source,
+        "configuredDataSource": configured_source,
+        "sourceMismatch": configured_source != resolved_target_source,
         "today": pd.Timestamp.now(tz="Asia/Shanghai").date().isoformat(),
         "envPath": ".env",
         "envFileExists": env_exists,

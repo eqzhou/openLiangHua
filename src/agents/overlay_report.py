@@ -201,6 +201,15 @@ def _load_portfolio(root: Path, data_source: str, model_name: str, split_name: s
 def _load_industry_name_map(root: Path, data_source: str) -> dict[str, str]:
     mapping: dict[str, str] = {}
 
+    stock_basic_path = source_or_canonical_path(root / "data" / "staging", "stock_basic.parquet", data_source)
+    if stock_basic_path.exists():
+        stock_basic = pd.read_parquet(stock_basic_path)
+        if {"ts_code", "industry"}.issubset(stock_basic.columns):
+            valid = stock_basic.loc[stock_basic["industry"].notna()].copy()
+            valid["industry"] = valid["industry"].astype(str).str.strip()
+            valid = valid.loc[valid["industry"] != ""]
+            mapping.update(valid.drop_duplicates("ts_code").set_index("ts_code")["industry"].astype(str).to_dict())
+
     snapshot_path = root / "data" / "staging" / "stock_snapshot.parquet"
     if snapshot_path.exists():
         snapshot = pd.read_parquet(snapshot_path)
@@ -321,7 +330,8 @@ def _build_reasons(row: pd.Series) -> tuple[str, str]:
 def _industry_display(row: pd.Series, industry_name_map: dict[str, str]) -> str:
     ts_code = str(row.get("ts_code", ""))
     readable = industry_name_map.get(ts_code)
-    raw_industry = str(row.get("industry", "") or "")
+    raw_value = row.get("industry", "")
+    raw_industry = "" if pd.isna(raw_value) else str(raw_value).strip()
     if readable:
         if raw_industry.startswith("SW_") and readable != raw_industry:
             return f"{readable}（{raw_industry}）"

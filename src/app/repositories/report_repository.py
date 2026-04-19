@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -142,6 +143,139 @@ def _read_csv_frame(path: Path) -> pd.DataFrame:
     return frame
 
 
+def _normalize_industry_text(value: Any) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _symbol_snapshot_cache_path(root: Path) -> Path:
+    return root / "data" / "staging" / "stock_snapshot.parquet"
+
+
+def _board_industry_cache_path(root: Path) -> Path:
+    return root / "data" / "staging" / "industry_board_map.parquet"
+
+
+def _read_snapshot_cache(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame(columns=["ts_code", "industry", "list_date"])
+    frame = pd.read_parquet(path)
+    if "list_date" in frame.columns:
+        frame["list_date"] = pd.to_datetime(frame["list_date"], errors="coerce")
+    return frame
+
+
+def _industry_mapping_from_cache(frame: pd.DataFrame) -> dict[str, str]:
+    if frame.empty or "ts_code" not in frame.columns or "industry" not in frame.columns:
+        return {}
+    working = frame.copy()
+    working["industry"] = working["industry"].map(_normalize_industry_text)
+    working = working.loc[working["industry"].notna()].drop_duplicates(subset=["ts_code"], keep="last")
+    if working.empty:
+        return {}
+    return working.set_index("ts_code")["industry"].astype(str).to_dict()
+
+
+def _fetch_symbol_snapshot_industries(root: Path, symbols: list[str], *, allow_network: bool = False) -> dict[str, str]:
+    normalized_symbols = sorted({str(symbol or "").strip() for symbol in symbols if str(symbol or "").strip()})
+    if not normalized_symbols:
+        return {}
+
+    snapshot_path = _symbol_snapshot_cache_path(root)
+    board_map_path = _board_industry_cache_path(root)
+    snapshot_cache = _read_snapshot_cache(snapshot_path)
+    mapping = _industry_mapping_from_cache(snapshot_cache)
+    client = None
+
+    missing_symbols = [symbol for symbol in normalized_symbols if symbol not in mapping]
+    if missing_symbols and allow_network:
+        try:
+            from src.data.akshare_client import AKShareClient
+
+            client = AKShareClient()
+        except Exception:
+            client = None
+
+        fetched_rows: list[dict[str, Any]] = []
+        if client is not None:
+            for symbol in missing_symbols:
+                snapshot: dict[str, Any] | None = None
+                for attempt in range(3):
+                    try:
+                        snapshot = client.stock_individual_snapshot(symbol)
+                        break
+                    except Exception:
+                        if attempt == 2:
+                            snapshot = None
+                        else:
+                            time.sleep(0.6 * (attempt + 1))
+                if snapshot is None:
+                    continue
+                fetched_rows.append(
+                    {
+                        "ts_code": symbol,
+                        "industry": _normalize_industry_text(snapshot.get("industry")),
+                        "list_date": pd.to_datetime(snapshot.get("list_date"), errors="coerce"),
+                    }
+                )
+
+        if fetched_rows:
+            updated_snapshot = pd.concat([snapshot_cache, pd.DataFrame(fetched_rows)], ignore_index=True)
+            updated_snapshot = updated_snapshot.drop_duplicates(subset=["ts_code"], keep="last").sort_values("ts_code")
+            ensure_dir(snapshot_path.parent)
+            updated_snapshot.to_parquet(snapshot_path, index=False)
+            mapping.update(_industry_mapping_from_cache(updated_snapshot))
+
+    missing_symbols = [symbol for symbol in normalized_symbols if symbol not in mapping]
+    if missing_symbols and allow_network:
+        board_cache = _read_snapshot_cache(board_map_path)
+        board_mapping = _industry_mapping_from_cache(board_cache)
+        if not board_mapping and client is not None:
+            for attempt in range(3):
+                try:
+                    board_cache = client.current_board_industry_map()
+                    if not board_cache.empty:
+                        ensure_dir(board_map_path.parent)
+                        board_cache.to_parquet(board_map_path, index=False)
+                    board_mapping = _industry_mapping_from_cache(board_cache)
+                    break
+                except Exception:
+                    board_mapping = {}
+                    if attempt < 2:
+                        time.sleep(1.0 * (attempt + 1))
+        mapping.update({symbol: board_mapping[symbol] for symbol in missing_symbols if symbol in board_mapping})
+
+    return {symbol: mapping[symbol] for symbol in normalized_symbols if symbol in mapping}
+
+
+def _enrich_missing_industries(root: Path, frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty or "ts_code" not in frame.columns:
+        return frame
+
+    working = frame.copy()
+    if "industry" not in working.columns:
+        working["industry"] = pd.NA
+    working["industry"] = working["industry"].map(_normalize_industry_text)
+
+    missing_mask = working["industry"].isna()
+    if not missing_mask.any():
+        return working
+
+    industry_mapping = _fetch_symbol_snapshot_industries(
+        root,
+        working.loc[missing_mask, "ts_code"].astype(str).tolist(),
+        allow_network=False,
+    )
+    if not industry_mapping:
+        return working
+
+    fill_values = working.loc[missing_mask, "ts_code"].astype(str).map(industry_mapping)
+    working.loc[missing_mask, "industry"] = fill_values.where(fill_values.notna(), working.loc[missing_mask, "industry"])
+    return working
+
+
 def _write_csv_variants(reports_dir: Path, filename: str, data_source: str, frame: pd.DataFrame) -> Path:
     source_path = source_prefixed_path(reports_dir, filename, data_source)
     frame.to_csv(source_path, index=False, encoding="utf-8-sig")
@@ -279,11 +413,11 @@ def load_daily_bar(root: Path | None = None, *, data_source: str, prefer_databas
     if prefer_database:
         artifact_payload = _binary_artifact_payload(binary_artifact_key(data_source, "daily_bar"))
         if artifact_payload is not None:
-            return _read_parquet_bytes(artifact_payload[0])
+            return _enrich_missing_industries(root or project_root(), _read_parquet_bytes(artifact_payload[0]))
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(resolved_root / "data" / "staging", "daily_bar.parquet", data_source)
-    frame = _read_parquet_frame(path)
+    frame = _enrich_missing_industries(resolved_root, _read_parquet_frame(path))
     if not frame.empty and "ts_code" in frame.columns:
         return frame
 

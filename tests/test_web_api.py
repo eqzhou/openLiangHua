@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from src.web_api.app import app
@@ -11,6 +12,11 @@ class WebApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.client = TestClient(app)
+
+    def assertDateLike(self, value) -> None:
+        self.assertNotIn(value, (None, ""))
+        parsed = pd.Timestamp(value)
+        self.assertFalse(pd.isna(parsed))
 
     def test_meta_endpoint_returns_frontend_bootstrap(self) -> None:
         response = self.client.get("/api/meta")
@@ -38,6 +44,20 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("watchlist", payload)
         self.assertIn("candidates", payload)
         self.assertIn("alerts", payload)
+        self.assertIn("aiReview", payload)
+        candidates = payload["candidates"]
+        self.assertIn("latestDate", candidates)
+        self.assertDateLike(candidates["latestDate"])
+        self.assertIn("focusRecord", candidates)
+        if candidates["focusRecord"]:
+            self.assertDateLike(candidates["focusRecord"]["trade_date"])
+        ai_review = payload["aiReview"]
+        self.assertIn("inferenceRecords", ai_review)
+        self.assertIn("historicalRecords", ai_review)
+        if ai_review["inferenceRecords"]:
+            self.assertDateLike(ai_review["inferenceRecords"][0]["trade_date"])
+        if ai_review["historicalRecords"]:
+            self.assertDateLike(ai_review["historicalRecords"][0]["trade_date"])
 
     def test_candidates_summary_endpoint_returns_snapshot_contract(self) -> None:
         response = self.client.get("/api/candidates/summary")
@@ -47,6 +67,12 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("latestPicks", payload)
         self.assertIn("symbolOptions", payload)
         self.assertIn("selectedRecord", payload)
+        self.assertIn("latestDate", payload)
+        self.assertDateLike(payload["latestDate"])
+        if payload["latestPicks"]:
+            self.assertDateLike(payload["latestPicks"][0]["trade_date"])
+        if payload["selectedRecord"]:
+            self.assertDateLike(payload["selectedRecord"]["trade_date"])
 
     def test_candidates_history_endpoint_returns_history_contract(self) -> None:
         response = self.client.get("/api/candidates/history")
@@ -55,6 +81,8 @@ class WebApiTests(unittest.TestCase):
         payload = response.json()
         self.assertIn("selectedSymbol", payload)
         self.assertIn("scoreHistory", payload)
+        if payload["scoreHistory"]:
+            self.assertDateLike(payload["scoreHistory"][0]["trade_date"])
 
     def test_watchlist_summary_endpoint_returns_list_first_contract(self) -> None:
         response = self.client.get("/api/watchlist/summary")
@@ -63,6 +91,19 @@ class WebApiTests(unittest.TestCase):
         payload = response.json()
         self.assertIn("records", payload)
         self.assertIn("selectedRecord", payload)
+        self.assertIn("realtimeStatus", payload)
+        if payload["records"]:
+            first_row = payload["records"][0]
+            self.assertDateLike(first_row["latest_bar_date"])
+            self.assertDateLike(first_row["inference_signal_date"])
+        if payload["selectedRecord"]:
+            self.assertDateLike(payload["selectedRecord"]["latest_bar_date"])
+            self.assertDateLike(payload["selectedRecord"]["inference_signal_date"])
+        realtime_status = payload["realtimeStatus"]
+        if realtime_status.get("trade_date"):
+            self.assertDateLike(realtime_status["trade_date"])
+        if realtime_status.get("fetched_at"):
+            self.assertDateLike(realtime_status["fetched_at"])
 
     def test_watchlist_detail_endpoint_returns_detail_contract(self) -> None:
         response = self.client.get("/api/watchlist/detail")
@@ -71,6 +112,14 @@ class WebApiTests(unittest.TestCase):
         payload = response.json()
         self.assertIn("detail", payload)
         self.assertIn("history", payload)
+        self.assertIn("discussionRows", payload)
+        if payload["detail"]:
+            self.assertDateLike(payload["detail"]["latest_bar_date"])
+            self.assertDateLike(payload["detail"]["inference_signal_date"])
+        if payload["history"]:
+            self.assertDateLike(payload["history"][0]["trade_date"])
+        if payload["discussionRows"]:
+            self.assertDateLike(payload["discussionRows"][0]["截面日期"])
 
     def test_ai_review_summary_endpoint_returns_summary_contract(self) -> None:
         response = self.client.get("/api/ai-review/summary")
@@ -81,6 +130,10 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("historical", payload)
         self.assertIn("candidates", payload["inference"])
         self.assertNotIn("brief", payload["inference"])
+        if payload["inference"]["candidates"]:
+            self.assertDateLike(payload["inference"]["candidates"][0]["trade_date"])
+        if payload["historical"]["candidates"]:
+            self.assertDateLike(payload["historical"]["candidates"][0]["trade_date"])
 
     def test_ai_review_detail_endpoint_returns_detail_contract(self) -> None:
         response = self.client.get("/api/ai-review/detail?scope=inference")
@@ -89,6 +142,9 @@ class WebApiTests(unittest.TestCase):
         payload = response.json()
         self.assertIn("selectedRecord", payload)
         self.assertIn("fieldRows", payload)
+        self.assertIn("llmResponse", payload)
+        if payload["selectedRecord"]:
+            self.assertDateLike(payload["selectedRecord"]["trade_date"])
 
     def test_factor_summary_endpoint_returns_list_first_contract(self) -> None:
         response = self.client.get("/api/factors/summary")

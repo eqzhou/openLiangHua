@@ -104,13 +104,17 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
   const tokenConfigured = payload?.tokenConfigured ?? null
   const hasToken = tokenConfigured === true
   const tokenStatusLabel = tokenConfigured === null ? '登录后可见' : hasToken ? '已配置' : '未配置'
-  const targetSource = payload?.targetSource ?? 'tushare'
+  const targetSource = payload?.targetSource ?? payload?.activeDataSource ?? 'akshare'
+  const actualSource = payload?.activeDataSource ?? targetSource
+  const configuredSource = payload?.configuredDataSource ?? actualSource
+  const sourceMismatch = payload?.sourceMismatch ?? false
   const pendingAction = incrementalRefreshMutation.isPending ? 'incremental' : fullRefreshMutation.isPending ? 'full' : null
 
   const heroBadges = (
     <>
       <Badge tone={tokenConfigured === null ? 'default' : hasToken ? 'good' : 'warn'}>{`Token ${tokenStatusLabel}`}</Badge>
-      <Badge tone="brand">{`目标源 ${payload?.targetSource ?? 'akshare'}`}</Badge>
+      <Badge tone="brand">{`当前源 ${actualSource}`}</Badge>
+      {sourceMismatch ? <Badge tone="warn">{`配置源 ${configuredSource}`}</Badge> : null}
       <Badge tone={authenticated ? 'good' : 'default'}>{authenticated ? '可执行' : '只读'}</Badge>
     </>
   )
@@ -135,11 +139,14 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
         <QueryNotice isLoading={dataQuery.isLoading} error={dataQuery.error} />
         {!authenticated ? <div className="query-notice query-notice--info">当前只读，可查看数据状态；如需执行刷新，请先登录。</div> : null}
         {authenticated && tokenConfigured === false ? <div className="query-notice query-notice--error">当前未检测到 `TUSHARE_TOKEN`，请先更新 `.env` 或运行环境变量。</div> : null}
+        {sourceMismatch ? (
+          <div className="query-notice query-notice--warn">{`当前实际落地数据源为 ${actualSource}，但配置文件仍指向 ${configuredSource}。系统已优先读取真实落地产物，建议后续统一配置与产物来源。`}</div>
+        ) : null}
 
         <SectionBlock title="当前数据结论">
           <SpotlightCard
             title="本地研究数据状态"
-            meta={`目标源 ${targetSource}`}
+            meta={`当前源 ${actualSource}`}
             subtitle={`日线最新日期 ${dailyBar.latestTradeDate ?? '-'}，特征最新日期 ${featurePanel.latestTradeDate ?? '-'}，标签最新日期 ${labelPanel.latestTradeDate ?? '-'}`}
             metrics={[
               { label: '日线行数', value: dailyBar.rowCount ?? 0, tone: dailyBar.exists ? 'good' : 'warn' },
@@ -156,7 +163,8 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
               { label: '.env 路径', value: payload?.envPath ?? '登录后可见', span: 'double' },
               { label: '.env 存在', value: payload?.envFileExists ?? false, tone: payload?.envFileExists ? 'good' : 'warn' },
               { label: 'Tushare Token', value: tokenStatusLabel, tone: tokenConfigured === null ? 'default' : hasToken ? 'good' : 'warn' },
-              { label: '目标数据源', value: payload?.targetSource ?? 'akshare' },
+              { label: '当前落地源', value: actualSource },
+              { label: '配置数据源', value: configuredSource, tone: sourceMismatch ? 'warn' : 'default' },
               { label: '今日日期', value: payload?.today ?? '-' },
               { label: '研究区间', value: `${formatValue(datasetSummary.date_min)} 至 ${formatValue(datasetSummary.date_max)}`, span: 'double' },
             ]}

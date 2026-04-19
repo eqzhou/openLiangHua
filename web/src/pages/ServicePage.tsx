@@ -25,6 +25,22 @@ interface ServicePageProps {
   authenticated?: boolean
 }
 
+function normalizeServiceStatusLabel(label: unknown): string {
+  const text = String(label ?? '').trim()
+  if (text === '状态脚本不可用') {
+    return '本机未启用状态脚本'
+  }
+  return text || '未知'
+}
+
+function serviceStatusDescription(label: unknown): string {
+  const text = String(label ?? '').trim()
+  if (text === '状态脚本不可用') {
+    return '当前环境没有启用 PowerShell 状态脚本，页面运行状态改为根据本地日志与实时快照辅助判断。'
+  }
+  return ''
+}
+
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim()
@@ -69,6 +85,8 @@ export function ServicePage({ authenticated = false }: ServicePageProps) {
   const lastStatus = (payload.last_status as JsonRecord | undefined) ?? {}
   const realtimeSnapshot = (payload.realtime_snapshot as JsonRecord | undefined) ?? {}
   const statusTone = String(payload.effective_state ?? '').toLowerCase() === 'running' ? 'good' : 'warn'
+  const serviceStatusLabel = normalizeServiceStatusLabel(payload.status_label_display)
+  const serviceStatusHint = serviceStatusDescription(payload.status_label_display)
   const snapshotMode = describeRealtimeSnapshotMode(realtimeSnapshot.snapshot_bucket, realtimeSnapshot.served_from)
   const snapshotSource = describeRealtimeSource(realtimeSnapshot.source)
   const snapshotFailedSymbols = normalizeRealtimeFailedSymbols(realtimeSnapshot.failed_symbols)
@@ -91,7 +109,7 @@ export function ServicePage({ authenticated = false }: ServicePageProps) {
 
   const serviceHeroBadges = (
     <>
-      <Badge tone={statusTone}>{`服务 ${String(payload.status_label_display ?? '未知')}`}</Badge>
+      <Badge tone={statusTone}>{`服务 ${serviceStatusLabel}`}</Badge>
       <Badge tone={payload.listener_present ? 'good' : 'warn'}>{payload.listener_present ? '监听正常' : '监听异常'}</Badge>
       <Badge tone={snapshotTone}>{String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}</Badge>
       <Badge tone="brand">{snapshotSource.label}</Badge>
@@ -115,14 +133,15 @@ export function ServicePage({ authenticated = false }: ServicePageProps) {
       <Panel title="状态" tone="warm" className="panel--summary-surface">
         <QueryNotice isLoading={serviceQuery.isLoading} error={serviceQuery.error} />
         {!authenticated ? <div className="query-notice query-notice--info">当前只读，可查看最近快照；如需刷新行情，请先登录。</div> : null}
+        {serviceStatusHint ? <div className="query-notice query-notice--info">{serviceStatusHint}</div> : null}
 
         <SectionBlock title="运行结论">
           <SpotlightCard
-            title={String(payload.status_label_display ?? '未知')}
+            title={serviceStatusLabel}
             meta="前端服务状态"
             subtitle={`最近更新时间 ${formatDateTime(lastStatus.last_update)}，快照状态 ${String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}。`}
             badges={[
-              { label: `服务 ${String(payload.status_label_display ?? '未知')}`, tone: statusTone },
+              { label: `服务 ${serviceStatusLabel}`, tone: statusTone },
               { label: payload.listener_present ? '8501 正常' : '8501 异常', tone: payload.listener_present ? 'good' : 'warn' },
               { label: String(realtimeSnapshot.snapshot_label_display ?? '暂无快照'), tone: snapshotTone },
               {
@@ -169,7 +188,7 @@ export function ServicePage({ authenticated = false }: ServicePageProps) {
                 { label: '交易日期', value: formatValue(realtimeSnapshot.trade_date) },
                 { label: '抓取时间', value: formatDateTime(realtimeSnapshot.fetched_at) },
                 { label: '数据来源', value: formatValue(realtimeSnapshot.served_from) },
-                { label: '快照状态', value: snapshotMode.label },
+                { label: '快照状态', value: String(realtimeSnapshot.snapshot_label_display ?? snapshotMode.label) },
                 { label: '是否当天', value: formatValue(realtimeSnapshot.is_today), tone: realtimeSnapshot.is_today ? 'good' : 'default' },
                 {
                   label: '失败股票',

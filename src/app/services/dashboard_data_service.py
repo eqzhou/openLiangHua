@@ -48,8 +48,11 @@ from src.utils.data_source import active_data_source
 from src.utils.io import project_root
 
 ROOT = project_root()
-ACTIVE_DATA_SOURCE = active_data_source()
 PROJECT_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+
+
+def _current_data_source() -> str:
+    return active_data_source()
 
 MODEL_NAMES = ["ridge", "lgbm", "ensemble"]
 SPLITS = ["valid", "test"]
@@ -374,7 +377,7 @@ def run_module(module_name: str) -> tuple[bool, str]:
 
 
 def sync_dashboard_database() -> tuple[bool, str]:
-    summary = sync_dashboard_artifacts(root=ROOT, data_source=ACTIVE_DATA_SOURCE)
+    summary = sync_dashboard_artifacts(root=ROOT, data_source=_current_data_source())
     return summary.ok, summary.message
 
 
@@ -383,31 +386,36 @@ def list_available_actions() -> list[dict[str, str]]:
 
 
 def clear_dashboard_data_caches() -> None:
-    load_experiment_config.cache_clear()
-    load_watchlist_config.cache_clear()
-    load_dataset_summary.cache_clear()
-    load_feature_panel.cache_clear()
-    load_daily_bar.cache_clear()
-    load_overlay_candidates.cache_clear()
-    load_overlay_packet.cache_clear()
-    load_overlay_brief.cache_clear()
-    load_overlay_inference_candidates.cache_clear()
-    load_overlay_inference_shortlist.cache_clear()
-    load_overlay_inference_packet.cache_clear()
-    load_overlay_inference_brief.cache_clear()
-    load_overlay_llm_bundle.cache_clear()
-    load_predictions.cache_clear()
-    load_candidate_snapshot.cache_clear()
-    build_candidate_snapshot.cache_clear()
-    load_factor_explorer_snapshot.cache_clear()
-    build_factor_explorer_snapshot.cache_clear()
-    load_portfolio.cache_clear()
-    load_metrics.cache_clear()
-    load_feature_importance.cache_clear()
-    load_diagnostic_table.cache_clear()
-    load_stability.cache_clear()
-    load_latest_symbol_markdown.cache_clear()
-    build_metrics_table.cache_clear()
+    for cached_func in (
+        load_experiment_config,
+        load_watchlist_config,
+        load_dataset_summary,
+        load_feature_panel,
+        load_daily_bar,
+        load_overlay_candidates,
+        load_overlay_packet,
+        load_overlay_brief,
+        load_overlay_inference_candidates,
+        load_overlay_inference_shortlist,
+        load_overlay_inference_packet,
+        load_overlay_inference_brief,
+        load_overlay_llm_bundle,
+        load_predictions,
+        load_candidate_snapshot,
+        build_candidate_snapshot,
+        load_factor_explorer_snapshot,
+        build_factor_explorer_snapshot,
+        load_portfolio,
+        load_metrics,
+        load_feature_importance,
+        load_diagnostic_table,
+        load_stability,
+        load_latest_symbol_markdown,
+        build_metrics_table,
+        build_watchlist_base_frame,
+        load_watchlist_snapshot,
+    ):
+        getattr(cached_func, "cache_clear", lambda: None)()
     clear_snapshot_caches()
 
 
@@ -427,130 +435,107 @@ def load_watchlist_config() -> dict:
     return repo_load_watchlist_config(ROOT)
 
 
-@lru_cache(maxsize=1)
 def load_dataset_summary() -> dict[str, object]:
-    return repo_load_dataset_summary(ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_dataset_summary(ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=1)
 def load_feature_panel() -> pd.DataFrame:
-    return repo_load_feature_panel(ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_feature_panel(ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=1)
 def load_daily_bar() -> pd.DataFrame:
-    return repo_load_daily_bar(ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_daily_bar(ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=1)
 def load_overlay_candidates() -> pd.DataFrame:
-    return repo_load_overlay_candidates(ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_overlay_candidates(ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=1)
 def load_overlay_packet() -> dict:
-    return repo_load_overlay_packet(ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_overlay_packet(ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=1)
 def load_overlay_brief() -> str:
-    return repo_load_overlay_brief(ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_overlay_brief(ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=1)
 def load_overlay_inference_candidates() -> pd.DataFrame:
-    return repo_load_overlay_inference_candidates(ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_overlay_inference_candidates(ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=1)
 def load_overlay_inference_shortlist() -> str:
-    return repo_load_overlay_inference_shortlist(ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_overlay_inference_shortlist(ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=1)
 def load_overlay_inference_packet() -> dict:
-    return repo_load_overlay_inference_packet(ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_overlay_inference_packet(ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=1)
 def load_overlay_inference_brief() -> str:
-    return repo_load_overlay_inference_brief(ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_overlay_inference_brief(ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=2)
 def load_overlay_llm_bundle(scope: str) -> dict[str, object]:
     normalized_scope = "inference" if scope == "inference" else "historical"
     packet = load_overlay_inference_packet() if normalized_scope == "inference" else load_overlay_packet()
     return repo_load_overlay_llm_bundle(
         ROOT,
-        data_source=ACTIVE_DATA_SOURCE,
+        data_source=_current_data_source(),
         scope=normalized_scope,
         packet=packet,
     )
 
 
-@lru_cache(maxsize=8)
 def load_predictions(model_name: str, split_name: str) -> pd.DataFrame:
-    return repo_load_predictions(ROOT, data_source=ACTIVE_DATA_SOURCE, model_name=model_name, split_name=split_name)
+    return repo_load_predictions(ROOT, data_source=_current_data_source(), model_name=model_name, split_name=split_name)
 
 
-@lru_cache(maxsize=16)
 def build_candidate_snapshot(model_name: str, split_name: str) -> pd.DataFrame:
     return snapshot_build_candidate_snapshot(model_name, split_name)
 
 
-@lru_cache(maxsize=16)
 def load_candidate_snapshot(model_name: str, split_name: str) -> pd.DataFrame | None:
     return snapshot_load_candidate_snapshot(model_name, split_name)
 
 
-@lru_cache(maxsize=1)
 def build_factor_explorer_snapshot() -> dict[str, object]:
     return snapshot_build_factor_explorer_snapshot(tuple(sorted(FIELD_EXPLANATIONS.items())))
 
 
-@lru_cache(maxsize=1)
 def load_factor_explorer_snapshot() -> dict[str, object] | None:
     return snapshot_load_factor_explorer_snapshot()
 
 
-@lru_cache(maxsize=8)
 def load_portfolio(model_name: str, split_name: str) -> pd.DataFrame:
-    return repo_load_portfolio(ROOT, data_source=ACTIVE_DATA_SOURCE, model_name=model_name, split_name=split_name)
+    return repo_load_portfolio(ROOT, data_source=_current_data_source(), model_name=model_name, split_name=split_name)
 
 
-@lru_cache(maxsize=8)
 def load_metrics(model_name: str, split_name: str) -> dict:
-    return repo_load_metrics(ROOT, data_source=ACTIVE_DATA_SOURCE, model_name=model_name, split_name=split_name)
+    return repo_load_metrics(ROOT, data_source=_current_data_source(), model_name=model_name, split_name=split_name)
 
 
-@lru_cache(maxsize=4)
 def load_feature_importance(model_name: str) -> pd.DataFrame:
-    return repo_load_feature_importance(ROOT, data_source=ACTIVE_DATA_SOURCE, model_name=model_name)
+    return repo_load_feature_importance(ROOT, data_source=_current_data_source(), model_name=model_name)
 
 
-@lru_cache(maxsize=16)
 def load_diagnostic_table(model_name: str, split_name: str, table_name: str) -> pd.DataFrame:
     return repo_load_diagnostic_table(
         ROOT,
-        data_source=ACTIVE_DATA_SOURCE,
+        data_source=_current_data_source(),
         model_name=model_name,
         split_name=split_name,
         table_name=table_name,
     )
 
 
-@lru_cache(maxsize=4)
 def load_stability(model_name: str) -> dict:
-    return repo_load_stability(ROOT, data_source=ACTIVE_DATA_SOURCE, model_name=model_name)
+    return repo_load_stability(ROOT, data_source=_current_data_source(), model_name=model_name)
 
 
-@lru_cache(maxsize=64)
 def load_latest_symbol_markdown(symbol: str, note_kind: str) -> dict[str, str]:
-    return repo_load_latest_symbol_markdown(symbol, note_kind, root=ROOT, data_source=ACTIVE_DATA_SOURCE)
+    return repo_load_latest_symbol_markdown(symbol, note_kind, root=ROOT, data_source=_current_data_source())
 
 
-@lru_cache(maxsize=1)
 def build_metrics_table() -> pd.DataFrame:
     rows: list[dict] = []
     for model_name in MODEL_NAMES:
@@ -563,11 +548,9 @@ def build_metrics_table() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-@lru_cache(maxsize=1)
 def build_watchlist_base_frame() -> pd.DataFrame:
     return snapshot_build_watchlist_base_frame()
 
 
-@lru_cache(maxsize=1)
 def load_watchlist_snapshot() -> pd.DataFrame | None:
     return snapshot_load_watchlist_snapshot()

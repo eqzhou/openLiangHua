@@ -172,6 +172,45 @@ Stop the dashboard supervisor:
 powershell -ExecutionPolicy Bypass -File .\scripts\stop_streamlit.ps1
 ```
 
+## Local PM2 Startup
+
+For local React + FastAPI usage, you can run both services under PM2.
+
+Install PM2 once:
+
+```bash
+npm install -g pm2
+```
+
+Start both services from the repo root:
+
+```bash
+pm2 start ecosystem.config.cjs
+```
+
+Default local endpoints:
+
+- FastAPI: `http://127.0.0.1:8001`
+- React dev server: `http://127.0.0.1:5174`
+
+Common PM2 commands:
+
+```bash
+pm2 status
+pm2 logs openlianghua-api
+pm2 logs openlianghua-web
+pm2 restart openlianghua-api
+pm2 restart openlianghua-web
+pm2 stop ecosystem.config.cjs
+pm2 delete ecosystem.config.cjs
+```
+
+Notes:
+
+- `ecosystem.config.cjs` uses `scripts/start_research_api.sh` and `scripts/start_react_web.sh`.
+- The API startup script will try `.venv`, then `.venv-codex`, then system `python3`.
+- The React service runs the Vite dev server, which is suitable for local workstation use.
+
 ## Optional MyQuant Data Layer
 
 If you have a MyQuant token and the official `gm` SDK installed in a supported Python 3.11/3.12 environment, you can download a parallel dataset without overwriting the free AKShare outputs by default.

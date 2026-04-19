@@ -95,6 +95,8 @@ export interface DataArtifactStatus {
 export interface DataManagementPayload {
   targetSource: string
   activeDataSource: string
+  configuredDataSource?: string
+  sourceMismatch?: boolean
   today: string
   envPath?: string | null
   envFileExists: boolean

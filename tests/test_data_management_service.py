@@ -47,6 +47,9 @@ class DataManagementServiceTests(unittest.TestCase):
             payload = build_data_management_payload(root=root, target_source="akshare")
 
         self.assertEqual(payload["targetSource"], "akshare")
+        self.assertEqual(payload["activeDataSource"], "akshare")
+        self.assertEqual(payload["configuredDataSource"], "akshare")
+        self.assertFalse(payload["sourceMismatch"])
         self.assertTrue(payload["tokenConfigured"])
         self.assertTrue(payload["envFileExists"])
         self.assertEqual(payload["dailyBar"]["latestTradeDate"], "2026-04-16")
@@ -90,3 +93,37 @@ class DataManagementServiceTests(unittest.TestCase):
 
         self.assertFalse(payload["envFileExists"])
         self.assertTrue(payload["tokenConfigured"])
+
+    def test_build_data_management_payload_reports_materialized_source_when_config_mismatches(self) -> None:
+        from src.app.services.data_management_service import build_data_management_payload
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / ".env").write_text("TUSHARE_TOKEN=test-token\n", encoding="utf-8")
+
+            staging_dir = root / "data" / "staging"
+            features_dir = root / "data" / "features"
+            labels_dir = root / "data" / "labels"
+            staging_dir.mkdir(parents=True)
+            features_dir.mkdir(parents=True)
+            labels_dir.mkdir(parents=True)
+
+            pd.DataFrame([{"trade_date": "2026-04-16", "ts_code": "000001.SZ", "close": 10.5}]).to_parquet(
+                staging_dir / "akshare_daily_bar.parquet",
+                index=False,
+            )
+            pd.DataFrame([{"trade_date": "2026-04-16", "ts_code": "000001.SZ", "mom_20": 0.18}]).to_parquet(
+                features_dir / "akshare_feature_panel.parquet",
+                index=False,
+            )
+            pd.DataFrame([{"trade_date": "2026-04-16", "ts_code": "000001.SZ", "ret_t1_t10": 0.05}]).to_parquet(
+                labels_dir / "akshare_label_panel.parquet",
+                index=False,
+            )
+
+            payload = build_data_management_payload(root=root, target_source="tushare")
+
+        self.assertEqual(payload["configuredDataSource"], "tushare")
+        self.assertEqual(payload["activeDataSource"], "akshare")
+        self.assertEqual(payload["targetSource"], "akshare")
+        self.assertTrue(payload["sourceMismatch"])
