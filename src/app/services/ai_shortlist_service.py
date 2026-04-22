@@ -93,7 +93,7 @@ def save_overlay_inference_shortlist(
         latest_date=str(packet.get("latest_date", "") or "-"),
         rows=rows,
     )
-    source_path = save_text_report(
+    artifact_ref = save_text_report(
         root=root or project_root(),
         data_source=data_source,
         filename="overlay_inference_shortlist.md",
@@ -103,5 +103,5 @@ def save_overlay_inference_shortlist(
     return {
         "rows": rows,
         "markdown": markdown,
-        "source_path": str(source_path),
+        "artifact_ref": str(artifact_ref),
     }

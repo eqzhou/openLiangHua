@@ -85,6 +85,73 @@ class DatabaseRepositoryTests(unittest.TestCase):
             self.assertEqual(len(loaded), 1)
             self.assertEqual(str(loaded.iloc[0]["ts_code"]), "000001.SZ")
 
+    def test_load_feature_history_for_symbol_prefers_scoped_research_panel_query(self) -> None:
+        frame = pd.DataFrame(
+            [
+                {"trade_date": "2026-04-02", "ts_code": "000001.SZ", "mom_20": 0.12},
+                {"trade_date": "2026-04-03", "ts_code": "000001.SZ", "mom_20": 0.18},
+            ]
+        )
+
+        with patch("src.app.repositories.report_repository.load_research_panel", return_value=frame) as load_research_panel:
+            loaded = report_repository.load_feature_history_for_symbol(data_source="akshare", symbol="000001.SZ", factor_name="mom_20")
+
+        self.assertEqual(len(loaded), 2)
+        self.assertEqual(load_research_panel.call_args.kwargs["columns"], ["trade_date", "ts_code", "mom_20"])
+        self.assertEqual(load_research_panel.call_args.kwargs["symbols"], ["000001.SZ"])
+
+    def test_load_prediction_history_for_symbol_prefers_database_filtered_rows(self) -> None:
+        fake_store = Mock()
+        fake_store.get_projected_json_records.return_value = [
+            {"trade_date": "2026-04-02", "ts_code": "000001.SZ", "score": 0.8},
+            {"trade_date": "2026-04-03", "ts_code": "000001.SZ", "score": 0.9},
+        ]
+
+        with patch("src.app.repositories.report_repository.get_dashboard_artifact_store", return_value=fake_store):
+            loaded = report_repository.load_prediction_history_for_symbol(
+                data_source="akshare",
+                model_name="lgbm",
+                split_name="test",
+                symbol="000001.SZ",
+            )
+
+        self.assertEqual(len(loaded), 2)
+        self.assertEqual(fake_store.get_projected_json_records.call_args.kwargs["filter_field_name"], "ts_code")
+        self.assertEqual(fake_store.get_projected_json_records.call_args.kwargs["filter_field_value"], "000001.SZ")
+        self.assertEqual(fake_store.get_projected_json_records.call_args.kwargs["field_names"], ["trade_date", "ts_code", "score", "ret_t1_t10"])
+        self.assertEqual(fake_store.get_projected_json_records.call_args.kwargs["limit"], 240)
+
+    def test_load_overlay_candidate_summary_records_prefers_database_projection(self) -> None:
+        fake_store = Mock()
+        fake_store.get_projected_json_records.return_value = [
+            {"ts_code": "000001.SZ", "name": "示例", "trade_date": "2026-04-03"},
+        ]
+
+        with patch("src.app.repositories.report_repository.get_dashboard_artifact_store", return_value=fake_store):
+            loaded = report_repository.load_overlay_candidate_summary_records(
+                data_source="akshare",
+                scope="inference",
+                field_names=["ts_code", "name", "trade_date"],
+            )
+
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(fake_store.get_projected_json_records.call_args.kwargs["field_names"], ["ts_code", "name", "trade_date"])
+
+    def test_load_watchlist_record_prefers_database_filtered_row(self) -> None:
+        fake_store = Mock()
+        fake_store.get_json_records_by_field.return_value = [
+            {"ts_code": "000001.SZ", "name": "示例持仓", "mark_price": 10.5},
+        ]
+
+        with patch("src.app.repositories.report_repository.get_dashboard_artifact_store", return_value=fake_store):
+            loaded = report_repository.load_watchlist_record(
+                data_source="akshare",
+                symbol="000001.SZ",
+            )
+
+        self.assertEqual(loaded["ts_code"], "000001.SZ")
+        self.assertEqual(fake_store.get_json_records_by_field.call_args.kwargs["field_value"], "000001.SZ")
+
     def test_load_overlay_llm_bundle_prefers_database_text_artifacts(self) -> None:
         response_artifact = DashboardArtifact(
             artifact_key=overlay_llm_responses_artifact_key("akshare", "historical"),

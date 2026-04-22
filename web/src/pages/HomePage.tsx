@@ -17,11 +17,12 @@ import { SpotlightCard } from '../components/SpotlightCard'
 import { SupportPanel } from '../components/SupportPanel'
 import { Badge } from '../components/Badge'
 import { WorkspaceHero } from '../components/WorkspaceHero'
-import { homePageClient } from '../facades/dashboardPageClient'
+import { homeAiReviewClient, homeCandidatesClient, homeSummaryClient, homeWatchlistClient } from '../facades/dashboardPageClient'
 import { formatDateTime, formatPercent, formatValue } from '../lib/format'
+import { HOME_REFETCH_INTERVAL_MS } from '../lib/polling'
 import { buildAiReviewPath, buildCandidatesPath, buildWatchlistPath } from '../lib/shareLinks'
 import { describeRealtimeSource, formatRealtimeCoverage, normalizeRealtimeFailedSymbols } from '../lib/realtime'
-import type { ActionResult, BootstrapPayload, HomePayload, JsonRecord } from '../types/api'
+import type { ActionResult, BootstrapPayload, HomeAiReviewPayload, HomeCandidatesPayload, HomeSummaryPayload, HomeWatchlistPayload, JsonRecord } from '../types/api'
 
 interface HomePageProps {
   bootstrap?: BootstrapPayload
@@ -106,20 +107,34 @@ export function HomePage({
   onShareCurrentView,
 }: HomePageProps) {
   const navigate = useNavigate()
-  const homeQuery = useQuery({
-    queryKey: homePageClient.queryKey(),
-    queryFn: () => apiGet<HomePayload>(homePageClient.path()),
-    refetchInterval: 15_000,
+  const homeSummaryQuery = useQuery({
+    queryKey: homeSummaryClient.queryKey(),
+    queryFn: () => apiGet<HomeSummaryPayload>(homeSummaryClient.path()),
+    refetchInterval: HOME_REFETCH_INTERVAL_MS,
+  })
+  const homeWatchlistQuery = useQuery({
+    queryKey: homeWatchlistClient.queryKey(),
+    queryFn: () => apiGet<HomeWatchlistPayload>(homeWatchlistClient.path()),
+    refetchInterval: HOME_REFETCH_INTERVAL_MS,
+  })
+  const homeCandidatesQuery = useQuery({
+    queryKey: homeCandidatesClient.queryKey(),
+    queryFn: () => apiGet<HomeCandidatesPayload>(homeCandidatesClient.path()),
+    refetchInterval: HOME_REFETCH_INTERVAL_MS,
+  })
+  const homeAiReviewQuery = useQuery({
+    queryKey: homeAiReviewClient.queryKey(),
+    queryFn: () => apiGet<HomeAiReviewPayload>(homeAiReviewClient.path()),
+    refetchInterval: HOME_REFETCH_INTERVAL_MS,
   })
 
-  const payload = homeQuery.data
-  const service = payload?.service ?? {}
+  const service = homeSummaryQuery.data?.service ?? {}
   const realtimeSnapshot = (service.realtime_snapshot as JsonRecord | undefined) ?? {}
-  const overview = payload?.overview
-  const watchlist = payload?.watchlist
-  const candidates = payload?.candidates
-  const aiReview = payload?.aiReview
-  const alerts = payload?.alerts ?? []
+  const overview = homeSummaryQuery.data?.overview
+  const watchlist = homeWatchlistQuery.data
+  const candidates = homeCandidatesQuery.data
+  const aiReview = homeAiReviewQuery.data
+  const alerts = homeSummaryQuery.data?.alerts ?? []
   const focusWatchRecord = watchlist?.focusRecord ?? {}
   const focusCandidateRecord = aiReview?.focusRecord ?? candidates?.focusRecord ?? {}
   const quickActions = useMemo(() => buildQuickActions(bootstrap), [bootstrap])
@@ -201,24 +216,27 @@ export function HomePage({
       <WorkspaceHero
         title="交易概览"
         className="home-anchor-hero"
+        description="把服务状态、候选结果、持仓重点和 AI 推理压缩到一个班次首页，先判断今天该盯什么，再决定进入哪条工作流。"
         badges={heroBadges}
-        controls={
-          <div className="dashboard-hero-controls">
-            {quickActions.slice(0, 2).map((action, index) => (
-              <button
-                key={action.actionName}
-                type="button"
-                className={`button ${index === 0 ? 'button--primary' : 'button--ghost'}`}
-                disabled={!authenticated || Boolean(actionPendingName)}
-                onClick={() => onRunAction(action.actionName)}
-              >
-                {actionPendingName === action.actionName ? action.spinnerText ?? '执行中...' : action.label}
-              </button>
-            ))}
-            <button type="button" className="button button--ghost" onClick={() => navigate('/workspace')}>
-              查看工作台
-            </button>
-          </div>
+        summary={
+          <dl className="workspace-hero__summary-grid">
+            <div>
+              <dt>页面服务</dt>
+              <dd>{String(service.status_label_display ?? '未知')}</dd>
+            </div>
+            <div>
+              <dt>行情快照</dt>
+              <dd>{String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}</dd>
+            </div>
+            <div>
+              <dt>观察池</dt>
+              <dd>{String(watchlist?.overview?.totalCount ?? 0)} 只</dd>
+            </div>
+            <div>
+              <dt>最强模型</dt>
+              <dd>{String(overview?.bestAnnualized?.model ?? '-').toUpperCase()}</dd>
+            </div>
+          </dl>
         }
       />
 
@@ -234,8 +252,11 @@ export function HomePage({
         />
       </div>
 
-      <Panel title="总览" tone="warm" className="panel--summary-surface home-desk-panel">
-        <QueryNotice isLoading={homeQuery.isLoading} error={homeQuery.error} />
+      <Panel title="总览" subtitle="先看班次结论、风险提醒和当前模型重心。" tone="warm" className="panel--summary-surface home-desk-panel">
+        <QueryNotice
+          isLoading={homeSummaryQuery.isLoading || homeWatchlistQuery.isLoading || homeCandidatesQuery.isLoading || homeAiReviewQuery.isLoading}
+          error={homeSummaryQuery.error ?? homeWatchlistQuery.error ?? homeCandidatesQuery.error ?? homeAiReviewQuery.error}
+        />
 
         <SectionBlock title="值班结论">
           <SpotlightCard
@@ -292,7 +313,7 @@ export function HomePage({
         ) : null}
       </Panel>
 
-      <Panel title="重点" className="panel--summary-surface home-focus-panel">
+      <Panel title="重点" subtitle="把当前最该关注的持仓与候选压成前台工作面。" className="panel--summary-surface home-focus-panel">
         <div className="split-layout">
           <SectionBlock title="持仓概览">
             <SpotlightCard
@@ -451,7 +472,7 @@ export function HomePage({
 
       <SupportPanel title="更多" className="home-support-panel">
         <SectionBlock title="AI Shortlist" collapsible defaultExpanded={false}>
-          <MarkdownCard title="最新推理 Shortlist" content={payload?.aiReview?.shortlistMarkdown} />
+          <MarkdownCard title="最新推理 Shortlist" content={aiReview?.shortlistMarkdown} />
         </SectionBlock>
 
         <SectionBlock title="观察池总表" collapsible defaultExpanded={false}>
@@ -460,7 +481,7 @@ export function HomePage({
             columns={WATCHLIST_COLUMNS}
             columnLabels={WATCHLIST_COLUMN_LABELS}
             storageKey="home-watchlist"
-            loading={homeQuery.isLoading}
+            loading={homeWatchlistQuery.isLoading}
             emptyText="暂无观察池数据"
             stickyFirstColumn
             cellRenderers={watchlistCellRenderers}
@@ -473,7 +494,7 @@ export function HomePage({
             columns={CANDIDATE_COLUMNS}
             columnLabels={CANDIDATE_COLUMN_LABELS}
             storageKey="home-candidates"
-            loading={homeQuery.isLoading}
+            loading={homeCandidatesQuery.isLoading}
             emptyText="暂无候选股"
             stickyFirstColumn
             cellRenderers={candidateCellRenderers}
@@ -486,7 +507,7 @@ export function HomePage({
             columns={INFERENCE_COLUMNS}
             columnLabels={INFERENCE_COLUMN_LABELS}
             storageKey="home-ai-inference"
-            loading={homeQuery.isLoading}
+            loading={homeAiReviewQuery.isLoading}
             emptyText="暂无 AI 推理股票"
             stickyFirstColumn
             cellRenderers={candidateCellRenderers}
@@ -506,7 +527,7 @@ export function HomePage({
                 span: 'double',
                 tone: failedSymbols.length ? 'warn' : 'good',
               },
-              { label: '参数概览', value: payload?.configSummaryText ?? '暂无参数概览', span: 'double' },
+              { label: '参数概览', value: homeSummaryQuery.data?.configSummaryText ?? '暂无参数概览', span: 'double' },
             ]}
           />
         </SectionBlock>

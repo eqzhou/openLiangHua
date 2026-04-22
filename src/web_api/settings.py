@@ -42,6 +42,7 @@ class ApiSettings:
     cors_origins: tuple[str, ...]
     auth_cookie_name: str
     auth_session_days: int
+    auth_touch_interval_seconds: int
     bootstrap_username: str
     bootstrap_password: str
     bootstrap_display_name: str
@@ -69,6 +70,7 @@ def get_api_settings() -> ApiSettings:
         ),
         auth_cookie_name=_env_text("APP_AUTH_COOKIE_NAME", "openlianghua_session"),
         auth_session_days=_env_int("APP_AUTH_SESSION_DAYS", 7),
+        auth_touch_interval_seconds=_env_int("APP_AUTH_SESSION_TOUCH_INTERVAL_SECONDS", 300),
         bootstrap_username=_env_text("APP_BOOTSTRAP_USERNAME", "admin"),
         bootstrap_password=_env_text("APP_BOOTSTRAP_PASSWORD", "Openlianghua@2026"),
         bootstrap_display_name=_env_text("APP_BOOTSTRAP_DISPLAY_NAME", "System Admin"),

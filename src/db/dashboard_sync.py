@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.app.repositories.config_repository import load_experiment_config, load_watchlist_config
+from src.app.repositories.config_repository import load_experiment_config, load_universe_config, load_watchlist_config
 from src.app.repositories.report_repository import (
     load_daily_bar,
     load_dataset_summary,
@@ -47,7 +47,6 @@ from src.db.dashboard_artifact_keys import (
 from src.db.dashboard_artifact_store import get_dashboard_artifact_store
 from src.utils.prediction_snapshot import build_latest_prediction_snapshot
 from src.utils.data_source import active_data_source
-from src.utils.data_source import source_or_canonical_path
 from src.utils.io import project_root
 
 MODEL_NAMES = ("ridge", "lgbm", "ensemble")
@@ -102,42 +101,7 @@ def _artifact_exists(store, artifact_key: str) -> bool:
 
 
 def _sync_llm_bridge_artifacts(*, store, data_source: str, scope: str, packet: dict[str, Any]) -> int:
-    llm_bridge = dict(packet.get("llm_bridge", {}) or {})
-    synced_items = 0
-
-    response_path_text = str(llm_bridge.get("response_jsonl_path", "") or "").strip()
-    if response_path_text:
-        response_path = Path(response_path_text)
-        if response_path.exists():
-            store.upsert_text(
-                artifact_key=overlay_llm_responses_artifact_key(data_source, scope),
-                data_source=data_source,
-                artifact_kind="jsonl",
-                content=response_path.read_text(encoding="utf-8", errors="ignore"),
-                metadata={
-                    "source_path": str(response_path),
-                    "size_bytes": response_path.stat().st_size,
-                },
-            )
-            synced_items += 1
-
-    summary_path_text = str(llm_bridge.get("response_summary_path", "") or "").strip()
-    if summary_path_text:
-        summary_path = Path(summary_path_text)
-        if summary_path.exists():
-            store.upsert_text(
-                artifact_key=overlay_llm_response_summary_artifact_key(data_source, scope),
-                data_source=data_source,
-                artifact_kind="markdown",
-                content=summary_path.read_text(encoding="utf-8", errors="ignore"),
-                metadata={
-                    "source_path": str(summary_path),
-                    "size_bytes": summary_path.stat().st_size,
-                },
-            )
-            synced_items += 1
-
-    return synced_items
+    return 0
 
 
 def _build_watchlist_snapshot(
@@ -150,13 +114,13 @@ def _build_watchlist_snapshot(
         root=root,
         data_source=data_source,
         watchlist_config=watchlist_config,
-        daily_bar=load_daily_bar(root, data_source=data_source, prefer_database=False),
-        ridge_predictions=load_predictions(root, data_source=data_source, model_name="ridge", split_name="test", prefer_database=False),
-        lgbm_predictions=load_predictions(root, data_source=data_source, model_name="lgbm", split_name="test", prefer_database=False),
-        ensemble_predictions=load_predictions(root, data_source=data_source, model_name="ensemble", split_name="test", prefer_database=False),
-        overlay_candidates=load_overlay_candidates(root, data_source=data_source, prefer_database=False),
-        ensemble_inference_predictions=load_predictions(root, data_source=data_source, model_name="ensemble", split_name="inference", prefer_database=False),
-        overlay_inference_candidates=load_overlay_inference_candidates(root, data_source=data_source, prefer_database=False),
+        daily_bar=load_daily_bar(root, data_source=data_source, prefer_database=True),
+        ridge_predictions=load_predictions(root, data_source=data_source, model_name="ridge", split_name="test", prefer_database=True),
+        lgbm_predictions=load_predictions(root, data_source=data_source, model_name="lgbm", split_name="test", prefer_database=True),
+        ensemble_predictions=load_predictions(root, data_source=data_source, model_name="ensemble", split_name="test", prefer_database=True),
+        overlay_candidates=load_overlay_candidates(root, data_source=data_source, prefer_database=True),
+        ensemble_inference_predictions=load_predictions(root, data_source=data_source, model_name="ensemble", split_name="inference", prefer_database=True),
+        overlay_inference_candidates=load_overlay_inference_candidates(root, data_source=data_source, prefer_database=True),
     )
 
 
@@ -261,7 +225,7 @@ def sync_factor_explorer_snapshot_artifact(
                 working_panel = load_feature_panel(
                     resolved_root,
                     data_source=resolved_data_source,
-                    prefer_database=False,
+                    prefer_database=True,
                 )
 
             numeric_columns = list_numeric_factor_columns(working_panel)
@@ -323,7 +287,7 @@ def sync_dataset_summary_artifact(
         payload = summary_payload or load_dataset_summary(
             resolved_root,
             data_source=resolved_data_source,
-            prefer_database=False,
+            prefer_database=True,
         )
         store.upsert_json(
             artifact_key=json_artifact_key(resolved_data_source, "dataset_summary"),
@@ -352,6 +316,16 @@ def sync_dashboard_artifacts(*, root: Path | None = None, data_source: str | Non
             artifact_kind="config",
             payload=_json_ready(experiment_config),
             metadata={"source_path": str(resolved_root / "config" / "experiment.yaml")},
+        )
+        synced_items += 1
+
+        universe_config = load_universe_config(resolved_root, prefer_database=False)
+        store.upsert_json(
+            artifact_key=config_artifact_key("universe"),
+            data_source="shared",
+            artifact_kind="config",
+            payload=_json_ready(universe_config),
+            metadata={"source_path": str(resolved_root / "config" / "universe.yaml")},
         )
         synced_items += 1
 

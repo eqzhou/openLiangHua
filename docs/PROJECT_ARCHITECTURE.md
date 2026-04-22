@@ -360,5 +360,5 @@ Realtime quote storage behavior:
 Current live dev ports:
 
 - React workspace: `5174`
-- FastAPI: `8001`
+- FastAPI: `8989`
 - Streamlit fallback: `8501`

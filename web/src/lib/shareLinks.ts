@@ -1,17 +1,5 @@
 import { buildShareablePageUrl } from '../facades/pageUrlState'
 
-function buildPathWithSearch(pathname: string, params: Record<string, string | null | undefined>): string {
-  const search = new URLSearchParams()
-  Object.entries(params).forEach(([key, value]) => {
-    if (!value) {
-      return
-    }
-    search.set(key, value)
-  })
-  const query = search.toString()
-  return query ? `${pathname}?${query}` : pathname
-}
-
 export async function copyTextToClipboard(text: string) {
   if (!navigator.clipboard?.writeText) {
     throw new Error('当前浏览器不支持剪贴板写入。')
@@ -25,21 +13,14 @@ export async function copyShareablePageLink(pathname: string, search: string): P
   return shareUrl
 }
 
-export function buildAiReviewPath(symbol: string): string {
-  return buildPathWithSearch('/ai-review', {
-    inference: symbol,
-    historical: symbol,
-  })
+export function buildAiReviewPath(symbol: string, scope: 'inference' | 'historical' = 'inference'): string {
+  return `/ai-review/${scope}/${symbol}`
 }
 
 export function buildWatchlistPath(symbol: string): string {
-  return buildPathWithSearch('/watchlist', {
-    symbol,
-  })
+  return `/watchlist/${symbol}`
 }
 
 export function buildCandidatesPath(symbol: string): string {
-  return buildPathWithSearch('/candidates', {
-    symbol,
-  })
+  return `/candidates/${symbol}`
 }

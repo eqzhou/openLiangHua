@@ -20,10 +20,10 @@ import { SegmentedControl } from '../components/SegmentedControl'
 import { SpotlightCard } from '../components/SpotlightCard'
 import { SupportPanel } from '../components/SupportPanel'
 import { WorkspaceHero } from '../components/WorkspaceHero'
-import { overviewPageClient } from '../facades/dashboardPageClient'
+import { overviewCurvesClient, overviewPageClient, overviewSummaryClient } from '../facades/dashboardPageClient'
 import { usePageSearchState } from '../facades/usePageSearchState'
 import { formatDateTime, formatPercent, formatValue } from '../lib/format'
-import type { BootstrapPayload, JsonRecord, OverviewPayload } from '../types/api'
+import type { BootstrapPayload, JsonRecord, OverviewCurvesPayload, OverviewSummaryPayload } from '../types/api'
 
 interface OverviewPageProps {
   bootstrap?: BootstrapPayload
@@ -93,13 +93,18 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
   const [curveView, setCurveView] = useState('all')
 
   const overviewQuery = useQuery({
-    queryKey: overviewPageClient.queryKey(params),
-    queryFn: () => apiGet<OverviewPayload>(overviewPageClient.path(params)),
+    queryKey: overviewSummaryClient.queryKey(params),
+    queryFn: () => apiGet<OverviewSummaryPayload>(overviewSummaryClient.path(params)),
+  })
+
+  const curvesQuery = useQuery({
+    queryKey: overviewCurvesClient.queryKey(params),
+    queryFn: () => apiGet<OverviewCurvesPayload>(overviewCurvesClient.path(params)),
   })
 
   const summary = overviewQuery.data?.summary ?? {}
   const comparison = useMemo(() => overviewQuery.data?.comparison ?? [], [overviewQuery.data?.comparison])
-  const equityCurves = useMemo(() => overviewQuery.data?.equityCurves ?? [], [overviewQuery.data?.equityCurves])
+  const equityCurves = useMemo(() => curvesQuery.data?.equityCurves ?? [], [curvesQuery.data?.equityCurves])
   const bestAnnualized = useMemo(() => findBestRow(comparison, 'daily_portfolio_annualized_return', 'max'), [comparison])
   const bestSharpe = useMemo(() => findBestRow(comparison, 'daily_portfolio_sharpe', 'max'), [comparison])
   const bestDrawdown = useMemo(() => findBestRow(comparison, 'daily_portfolio_max_drawdown', 'min'), [comparison])
@@ -244,7 +249,7 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
       </div>
 
       <Panel title="数据" subtitle={summary.date_max ? `研究区间 ${String(summary.date_min)} 至 ${String(summary.date_max)}` : undefined} tone="warm" className="panel--summary-surface">
-        <QueryNotice isLoading={overviewQuery.isLoading} error={overviewQuery.error} />
+        <QueryNotice isLoading={overviewQuery.isLoading || curvesQuery.isLoading} error={overviewQuery.error ?? curvesQuery.error} />
 
         <SectionBlock title="当前概览">
           <SpotlightCard

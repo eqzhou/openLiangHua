@@ -6,7 +6,7 @@ if (-not (Test-Path $python)) {
   $python = 'python'
 }
 
-$apiPort = 8001
+$apiPort = 8989
 
 Get-NetTCPConnection -LocalPort $apiPort -ErrorAction SilentlyContinue |
   Select-Object -ExpandProperty OwningProcess -Unique |

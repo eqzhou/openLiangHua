@@ -654,3 +654,44 @@ def merge_realtime_quotes(watchlist_view: pd.DataFrame, realtime_quotes: pd.Data
     )
 
     return merged
+
+
+def merge_realtime_quote_record(record: dict[str, Any], realtime_quote: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(record)
+    if not realtime_quote:
+        return merged
+
+    merged.update(realtime_quote)
+
+    realtime_price = pd.to_numeric(realtime_quote.get("realtime_price"), errors="coerce")
+    if pd.isna(realtime_price):
+        merged.setdefault("realtime_market_value", pd.NA)
+        merged.setdefault("realtime_unrealized_pnl", pd.NA)
+        merged.setdefault("realtime_unrealized_pnl_pct", pd.NA)
+        merged.setdefault("realtime_vs_mark_pct", pd.NA)
+        return merged
+
+    cost_basis = pd.to_numeric(record.get("cost_basis"), errors="coerce")
+    shares = pd.to_numeric(record.get("shares"), errors="coerce")
+    mark_price = pd.to_numeric(record.get("mark_price"), errors="coerce")
+
+    merged["realtime_market_value"] = realtime_price * shares if pd.notna(shares) else pd.NA
+    merged["realtime_unrealized_pnl"] = (realtime_price - cost_basis) * shares if pd.notna(cost_basis) and pd.notna(shares) else pd.NA
+    merged["realtime_unrealized_pnl_pct"] = realtime_price / cost_basis - 1.0 if pd.notna(cost_basis) and cost_basis != 0 else pd.NA
+    merged["realtime_vs_mark_pct"] = realtime_price / mark_price - 1.0 if pd.notna(mark_price) and mark_price != 0 else pd.NA
+    return merged
+
+
+def merge_realtime_quote_records(records: list[dict[str, Any]], realtime_quotes: pd.DataFrame) -> list[dict[str, Any]]:
+    if not records or realtime_quotes.empty or "ts_code" not in realtime_quotes.columns:
+        return [dict(record) for record in records]
+
+    quote_lookup = {
+        str(record.get("ts_code", "") or ""): dict(record)
+        for record in realtime_quotes.to_dict(orient="records")
+        if str(record.get("ts_code", "") or "")
+    }
+    return [
+        merge_realtime_quote_record(record, quote_lookup.get(str(record.get("ts_code", "") or "")))
+        for record in records
+    ]

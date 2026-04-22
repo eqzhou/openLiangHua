@@ -57,6 +57,45 @@ export interface HomePayload {
   }>
 }
 
+export interface HomeSummaryPayload {
+  configSummaryText: string
+  service: ServicePayload
+  overview: {
+    selectedSplit: string
+    summary: JsonRecord
+    bestAnnualized: JsonRecord
+    bestSharpe: JsonRecord
+    bestDrawdown: JsonRecord
+  }
+  alerts: Array<{
+    tone: string
+    title: string
+    detail: string
+  }>
+}
+
+export interface HomeWatchlistPayload {
+  overview: JsonRecord
+  realtimeStatus: JsonRecord
+  records: JsonRecord[]
+  focusRecord: JsonRecord
+}
+
+export interface HomeCandidatesPayload {
+  modelName: string
+  splitName: string
+  latestDate?: string | null
+  records: JsonRecord[]
+  focusRecord: JsonRecord
+}
+
+export interface HomeAiReviewPayload {
+  inferenceRecords: JsonRecord[]
+  historicalRecords: JsonRecord[]
+  focusRecord: JsonRecord
+  shortlistMarkdown?: string
+}
+
 export interface ActionResult {
   actionName: string
   label?: string
@@ -102,8 +141,9 @@ export interface DataManagementPayload {
   envFileExists: boolean
   tokenConfigured?: boolean | null
   dailyBar: DataArtifactStatus
-  featurePanel: DataArtifactStatus
-  labelPanel: DataArtifactStatus
+  researchPanel: DataArtifactStatus
+  legacyFeatureView: DataArtifactStatus
+  legacyLabelView: DataArtifactStatus
   datasetSummary: JsonRecord
   scripts: {
     incremental: string
@@ -114,6 +154,17 @@ export interface DataManagementPayload {
 export interface OverviewPayload {
   summary: JsonRecord
   comparison: JsonRecord[]
+  equityCurves: JsonRecord[]
+  selectedSplit: string
+}
+
+export interface OverviewSummaryPayload {
+  summary: JsonRecord
+  comparison: JsonRecord[]
+  selectedSplit: string
+}
+
+export interface OverviewCurvesPayload {
   equityCurves: JsonRecord[]
   selectedSplit: string
 }
@@ -166,6 +217,28 @@ export interface BacktestPayload {
   regimeDiagnostics: JsonRecord[]
 }
 
+export interface BacktestSummaryPayload {
+  modelName: string
+  splitName: string
+  metrics: JsonRecord
+  stability: JsonRecord
+}
+
+export interface BacktestPortfolioPayload {
+  modelName: string
+  splitName: string
+  portfolio: JsonRecord[]
+  monthlySummary: JsonRecord[]
+}
+
+export interface BacktestDiagnosticsPayload {
+  modelName: string
+  splitName: string
+  importance: JsonRecord[]
+  yearlyDiagnostics: JsonRecord[]
+  regimeDiagnostics: JsonRecord[]
+}
+
 export interface CandidatesPayload {
   modelName: string
   splitName: string
@@ -181,6 +254,10 @@ export interface CandidatesSummaryPayload {
   modelName: string
   splitName: string
   topN: number
+  page: number
+  pageSize: number
+  totalCount: number
+  totalPages: number
   latestDate?: string
   selectedSymbol?: string
   symbolOptions: string[]
@@ -193,6 +270,14 @@ export interface CandidateHistoryPayload {
   splitName: string
   selectedSymbol?: string
   scoreHistory: JsonRecord[]
+}
+
+export interface CandidateDetailPayload {
+  modelName: string
+  splitName: string
+  selectedSymbol?: string
+  selectedRecord: JsonRecord
+  fieldRows: JsonRecord[]
 }
 
 export interface WatchlistPayload {
@@ -213,6 +298,9 @@ export interface WatchlistSummaryPayload {
   overview: JsonRecord
   realtimeStatus: JsonRecord
   filters: JsonRecord
+  page: number
+  pageSize: number
+  totalPages: number
   refreshSymbols: string[]
   refreshPreviousCloses: JsonRecord
   selectedSymbol?: string

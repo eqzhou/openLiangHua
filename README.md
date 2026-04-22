@@ -193,7 +193,7 @@ pm2 start ecosystem.config.cjs
 
 Default local endpoints:
 
-- FastAPI: `http://127.0.0.1:8001`
+- FastAPI: `http://127.0.0.1:8989`
 - React dev server: `http://127.0.0.1:5174`
 
 Common PM2 commands:

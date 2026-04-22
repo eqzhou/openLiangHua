@@ -21,9 +21,9 @@ class TushareWorkflowTests(unittest.TestCase):
                     appended_trade_dates=4,
                     appended_rows=116,
                     symbols=29,
-                    daily_bar_path="/tmp/akshare_daily_bar.parquet",
-                    trade_calendar_path="/tmp/akshare_trade_calendar.parquet",
-                    stock_basic_path="/tmp/akshare_stock_basic.parquet",
+                    daily_bar_artifact_ref="artifact://akshare:binary:daily_bar",
+                    trade_calendar_artifact_ref="artifact://akshare:binary:trade_calendar",
+                    stock_basic_artifact_ref="artifact://akshare:binary:stock_basic",
                 ),
             ) as incremental,
             patch(
@@ -32,8 +32,8 @@ class TushareWorkflowTests(unittest.TestCase):
                     "data_source": "akshare",
                     "feature_rows": 1200,
                     "label_rows": 1180,
-                    "feature_path": "/tmp/akshare_feature_panel.parquet",
-                    "label_path": "/tmp/akshare_label_panel.parquet",
+                    "feature_artifact_ref": "artifact://akshare:binary:feature_panel",
+                    "label_artifact_ref": "artifact://akshare:binary:label_panel",
                 },
             ) as feature_builder,
             patch(

@@ -21,6 +21,13 @@ def _artifact_or_none(artifact_key: str) -> DashboardArtifact | None:
         return None
 
 
+def _uses_primary_cache_dir(cache_dir: Path) -> bool:
+    try:
+        return "openLiangHua" in str(cache_dir.resolve())
+    except OSError:
+        return False
+
+
 def _frame_from_bytes(content: bytes | None) -> pd.DataFrame:
     if not content:
         return pd.DataFrame()
@@ -52,10 +59,11 @@ def load_notice_cache(
     data_source: str,
     prefer_database: bool = True,
 ) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_cache_dir(cache_dir):
         artifact = _artifact_or_none(event_notice_cache_artifact_key(data_source, notice_date.strftime("%Y%m%d")))
         if artifact and artifact.payload_bytes is not None:
             return _frame_from_bytes(artifact.payload_bytes)
+        return pd.DataFrame()
 
     path = _notice_cache_path(cache_dir, notice_date)
     if not path.exists():
@@ -71,11 +79,7 @@ def save_notice_cache(
     data_source: str,
     prefer_database: bool = True,
 ) -> None:
-    ensure_dir(cache_dir)
-    path = _notice_cache_path(cache_dir, notice_date)
-    frame.to_parquet(path, index=False)
-
-    if prefer_database:
+    if prefer_database and _uses_primary_cache_dir(cache_dir):
         content = _frame_to_bytes(frame)
         get_dashboard_artifact_store().upsert_bytes(
             artifact_key=event_notice_cache_artifact_key(data_source, notice_date.strftime("%Y%m%d")),
@@ -85,10 +89,14 @@ def save_notice_cache(
             metadata={
                 "cache_kind": "event_notice",
                 "notice_date": notice_date.strftime("%Y-%m-%d"),
-                "source_path": str(path),
                 "size_bytes": len(content),
             },
         )
+        return
+
+    ensure_dir(cache_dir)
+    path = _notice_cache_path(cache_dir, notice_date)
+    frame.to_parquet(path, index=False)
 
 
 def load_news_cache(
@@ -98,10 +106,11 @@ def load_news_cache(
     data_source: str,
     prefer_database: bool = True,
 ) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_cache_dir(cache_dir):
         artifact = _artifact_or_none(event_news_cache_artifact_key(data_source, symbol_code))
         if artifact and artifact.payload_bytes is not None:
             return _frame_from_bytes(artifact.payload_bytes)
+        return pd.DataFrame()
 
     path = _news_cache_path(cache_dir, symbol_code)
     if not path.exists():
@@ -117,11 +126,7 @@ def save_news_cache(
     data_source: str,
     prefer_database: bool = True,
 ) -> None:
-    ensure_dir(cache_dir)
-    path = _news_cache_path(cache_dir, symbol_code)
-    frame.to_parquet(path, index=False)
-
-    if prefer_database:
+    if prefer_database and _uses_primary_cache_dir(cache_dir):
         content = _frame_to_bytes(frame)
         get_dashboard_artifact_store().upsert_bytes(
             artifact_key=event_news_cache_artifact_key(data_source, symbol_code),
@@ -131,10 +136,14 @@ def save_news_cache(
             metadata={
                 "cache_kind": "event_news",
                 "symbol_code": symbol_code,
-                "source_path": str(path),
                 "size_bytes": len(content),
             },
         )
+        return
+
+    ensure_dir(cache_dir)
+    path = _news_cache_path(cache_dir, symbol_code)
+    frame.to_parquet(path, index=False)
 
 
 def load_research_cache(
@@ -144,10 +153,11 @@ def load_research_cache(
     data_source: str,
     prefer_database: bool = True,
 ) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_cache_dir(cache_dir):
         artifact = _artifact_or_none(event_research_cache_artifact_key(data_source, symbol_code))
         if artifact and artifact.payload_bytes is not None:
             return _frame_from_bytes(artifact.payload_bytes)
+        return pd.DataFrame()
 
     path = _research_cache_path(cache_dir, symbol_code)
     if not path.exists():
@@ -163,11 +173,7 @@ def save_research_cache(
     data_source: str,
     prefer_database: bool = True,
 ) -> None:
-    ensure_dir(cache_dir)
-    path = _research_cache_path(cache_dir, symbol_code)
-    frame.to_parquet(path, index=False)
-
-    if prefer_database:
+    if prefer_database and _uses_primary_cache_dir(cache_dir):
         content = _frame_to_bytes(frame)
         get_dashboard_artifact_store().upsert_bytes(
             artifact_key=event_research_cache_artifact_key(data_source, symbol_code),
@@ -177,7 +183,11 @@ def save_research_cache(
             metadata={
                 "cache_kind": "event_research",
                 "symbol_code": symbol_code,
-                "source_path": str(path),
                 "size_bytes": len(content),
             },
         )
+        return
+
+    ensure_dir(cache_dir)
+    path = _research_cache_path(cache_dir, symbol_code)
+    frame.to_parquet(path, index=False)

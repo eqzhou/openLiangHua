@@ -78,7 +78,29 @@ export function WorkbenchPage({
     <div className="page-stack">
       <WorkspaceHero
         title="工作台"
+        className="workbench-anchor-hero"
+        description="这里负责研究参数、动作执行和界面控制。先确认参数，再按顺序跑研究动作，最后把结果回写到首页、持仓和 AI 分析页。"
         badges={heroBadges}
+        summary={
+          <dl className="workspace-hero__summary-grid">
+            <div>
+              <dt>页面服务</dt>
+              <dd>{String(service?.status_label_display ?? '未知')}</dd>
+            </div>
+            <div>
+              <dt>实时快照</dt>
+              <dd>{String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}</dd>
+            </div>
+            <div>
+              <dt>观察池</dt>
+              <dd>{shell?.watchlistEntryCount ?? 0} 只</dd>
+            </div>
+            <div>
+              <dt>当前模式</dt>
+              <dd>{authenticated ? currentUserLabel ?? '可写' : '只读'}</dd>
+            </div>
+          </dl>
+        }
       />
 
       <div className="metric-grid metric-grid--four">
@@ -88,7 +110,7 @@ export function WorkbenchPage({
         <MetricCard label="最近动作" value={latestAction?.label ?? latestAction?.actionName ?? '暂无'} tone={latestAction?.ok === false ? 'warn' : 'default'} />
       </div>
 
-      <Panel title="状态" tone="warm" className="panel--summary-surface">
+      <Panel title="状态" subtitle="先确认当前服务、快照和用户状态，再决定是否执行写操作。" tone="warm" className="panel--summary-surface workbench-status-panel">
         {shellError ? <div className="query-notice query-notice--error">{shellError}</div> : null}
         {shellLoading ? <div className="query-notice">同步中...</div> : null}
         {writeLocked ? (
@@ -119,7 +141,7 @@ export function WorkbenchPage({
 
       </Panel>
 
-      <Panel title="参数" eyebrow="01" className="panel--summary-surface">
+      <Panel title="参数" subtitle="研究参数会直接影响训练区间、标签周期和候选输出。" eyebrow="01" className="panel--summary-surface workbench-config-panel">
         <div className="split-layout split-layout--workspace">
           <SectionBlock title="参数表单">
             <form
@@ -192,7 +214,7 @@ export function WorkbenchPage({
         </div>
       </Panel>
 
-      <Panel title="动作" eyebrow="02" tone="calm" className="panel--table-surface">
+      <Panel title="动作" subtitle="这里是主执行台，所有研究动作都从这里发起。" eyebrow="02" tone="calm" className="panel--table-surface workbench-actions-panel">
         <div className="split-layout split-layout--workspace">
           <SectionBlock title="执行动作">
             <div className="action-stack">
@@ -235,7 +257,7 @@ export function WorkbenchPage({
         </SectionBlock>
       </Panel>
 
-      <Panel title="界面" eyebrow="03" className="panel--summary-surface">
+      <Panel title="界面" subtitle="当前页面的轻操作，包括分享、重置和缓存控制。" eyebrow="03" className="panel--summary-surface workbench-ui-panel">
         <div className="split-layout split-layout--workspace">
           <SectionBlock title="界面操作">
             <div className="action-stack">
@@ -260,7 +282,7 @@ export function WorkbenchPage({
         </div>
       </Panel>
 
-      <SupportPanel title="补充">
+      <SupportPanel title="补充" className="workbench-support-panel">
         <SectionBlock title="运行补充信息" tone="muted" collapsible defaultExpanded={false}>
           <PropertyGrid
             items={[

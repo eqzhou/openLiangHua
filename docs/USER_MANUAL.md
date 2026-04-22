@@ -9,7 +9,7 @@
 当前正式对外应以 `React + FastAPI` 版本为主：
 
 - React 工作台：`http://127.0.0.1:5174`
-- FastAPI 接口：`http://127.0.0.1:8001`
+- FastAPI 接口：`http://127.0.0.1:8989`
 - Streamlit：`http://127.0.0.1:8501`
 
 其中 `Streamlit` 仍然保留，但按照当前架构决议，它是回退面，不应再作为主操作界面继续扩展。
@@ -59,7 +59,7 @@ pm2 start ecosystem.config.cjs
 
 默认会启动：
 
-- API：`8001`
+- API：`8989`
 - React：`5174`
 
 常用命令：

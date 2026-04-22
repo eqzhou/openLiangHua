@@ -59,9 +59,9 @@ class IncrementalSyncSummary:
     appended_trade_dates: int
     appended_rows: int
     symbols: int
-    daily_bar_path: str
-    trade_calendar_path: str
-    stock_basic_path: str
+    daily_bar_artifact_ref: str
+    trade_calendar_artifact_ref: str
+    stock_basic_artifact_ref: str
 
 
 def _today_ts_date() -> str:
@@ -301,19 +301,24 @@ def _build_symbol_state(
 def _append_trade_day_snapshots(
     client: TushareClient,
     trade_dates: list[pd.Timestamp],
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[list[pd.Timestamp], pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    appended_trade_dates: list[pd.Timestamp] = []
     daily_frames: list[pd.DataFrame] = []
     basic_frames: list[pd.DataFrame] = []
     limit_frames: list[pd.DataFrame] = []
 
     for trade_date in trade_dates:
         trade_date_text = trade_date.strftime("%Y%m%d")
-        daily_frames.append(
-            _normalize_market_frame(
-                client.daily(trade_date=trade_date_text),
-                numeric_columns=["open", "high", "low", "close", "pre_close", "pct_chg", "vol", "amount"],
-            )
+        daily_frame = _normalize_market_frame(
+            client.daily(trade_date=trade_date_text),
+            numeric_columns=["open", "high", "low", "close", "pre_close", "pct_chg", "vol", "amount"],
         )
+        if daily_frame.empty:
+            logger.info("Skip trade_date {} because Tushare daily endpoint returned no rows yet.", trade_date_text)
+            continue
+
+        appended_trade_dates.append(pd.Timestamp(trade_date))
+        daily_frames.append(daily_frame)
         basic_frames.append(
             _normalize_market_frame(
                 client.daily_basic(trade_date=trade_date_text),
@@ -337,7 +342,7 @@ def _append_trade_day_snapshots(
         if "down_limit" not in limit.columns and "lower_limit" in limit.columns:
             limit = limit.rename(columns={"lower_limit": "down_limit"})
 
-    return daily, basic, limit
+    return appended_trade_dates, daily, basic, limit
 
 
 def _seeded_previous_close(frame: pd.DataFrame, *, column: str, seed_map: dict[str, float | int | None]) -> pd.Series:
@@ -507,17 +512,19 @@ def sync_incremental_daily_bar(
     target_columns = existing_panel.columns.tolist()
 
     appended_rows = pd.DataFrame(columns=target_columns)
+    appended_trade_dates: list[pd.Timestamp] = []
     if missing_trade_dates:
-        daily, daily_basic, limit = _append_trade_day_snapshots(client, missing_trade_dates)
-        appended_rows = _build_incremental_rows(
-            trade_dates=missing_trade_dates,
-            symbols=symbols,
-            symbol_state=symbol_state,
-            daily=daily,
-            daily_basic=daily_basic,
-            limit=limit,
-            target_columns=target_columns,
-        )
+        appended_trade_dates, daily, daily_basic, limit = _append_trade_day_snapshots(client, missing_trade_dates)
+        if appended_trade_dates:
+            appended_rows = _build_incremental_rows(
+                trade_dates=appended_trade_dates,
+                symbols=symbols,
+                symbol_state=symbol_state,
+                daily=daily,
+                daily_basic=daily_basic,
+                limit=limit,
+                target_columns=target_columns,
+            )
 
     combined_panel = (
         pd.concat([existing_panel, appended_rows], ignore_index=True, sort=False)
@@ -540,7 +547,7 @@ def sync_incremental_daily_bar(
     )
     combined_stock_basic = _normalize_stock_basic(combined_stock_basic)
 
-    saved_daily_bar_path = save_binary_dataset(
+    saved_daily_bar_artifact_ref = save_binary_dataset(
         resolved_root,
         data_source=resolved_target_source,
         directory="data/staging",
@@ -549,7 +556,7 @@ def sync_incremental_daily_bar(
         frame=combined_panel,
         write_canonical=resolved_write_canonical,
     )
-    saved_trade_calendar_path = save_binary_dataset(
+    saved_trade_calendar_artifact_ref = save_binary_dataset(
         resolved_root,
         data_source=resolved_target_source,
         directory="data/staging",
@@ -558,7 +565,7 @@ def sync_incremental_daily_bar(
         frame=combined_trade_calendar,
         write_canonical=resolved_write_canonical,
     )
-    saved_stock_basic_path = save_binary_dataset(
+    saved_stock_basic_artifact_ref = save_binary_dataset(
         resolved_root,
         data_source=resolved_target_source,
         directory="data/staging",
@@ -573,12 +580,12 @@ def sync_incremental_daily_bar(
         target_source=resolved_target_source,
         previous_latest_trade_date=last_trade_date.strftime("%Y-%m-%d"),
         latest_trade_date=None if pd.isna(latest_trade_date) else latest_trade_date.strftime("%Y-%m-%d"),
-        appended_trade_dates=len(missing_trade_dates),
+        appended_trade_dates=len(appended_trade_dates),
         appended_rows=int(len(appended_rows)),
         symbols=len(symbols),
-        daily_bar_path=str(saved_daily_bar_path),
-        trade_calendar_path=str(saved_trade_calendar_path),
-        stock_basic_path=str(saved_stock_basic_path),
+        daily_bar_artifact_ref=str(saved_daily_bar_artifact_ref),
+        trade_calendar_artifact_ref=str(saved_trade_calendar_artifact_ref),
+        stock_basic_artifact_ref=str(saved_stock_basic_artifact_ref),
     )
 
 

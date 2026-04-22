@@ -2,12 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.utils.io import load_yaml, project_root
+from src.app.repositories.config_repository import load_universe_config
+from src.utils.io import project_root
 
 
 def load_universe(config_path: Path | None = None) -> dict:
-    path = config_path or project_root() / "config" / "universe.yaml"
-    config = load_yaml(path)
+    if config_path is None:
+        config = load_universe_config(project_root(), prefer_database=True)
+    else:
+        resolved = config_path
+        if resolved.is_file() and resolved.name == "universe.yaml":
+            root = resolved.parent.parent
+        elif resolved.is_dir():
+            root = resolved
+        else:
+            root = resolved.parent
+        config = load_universe_config(root, prefer_database=False)
     mode = config.get("mode")
     if mode not in {"explicit", "current_index"}:
         raise ValueError("config/universe.yaml mode must be either explicit or current_index")

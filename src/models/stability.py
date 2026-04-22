@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from src.app.repositories.report_repository import save_model_stability_report
-from src.utils.data_source import source_prefixed_path
 
 
 def build_stability_summary(metrics_by_split: dict[str, dict]) -> dict[str, object]:
@@ -74,11 +72,4 @@ def save_stability_summary(
             model_name=model_name,
             summary=summary,
         )
-        return summary
-    source_path = source_prefixed_path(reports_dir, f"{model_name}_stability.json", data_source)
-    source_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    (reports_dir / f"{model_name}_stability.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
     return summary

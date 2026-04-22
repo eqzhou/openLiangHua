@@ -131,6 +131,15 @@ class PostgresAuthStore:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM app_sessions WHERE expires_at <= NOW()")
 
+    def _should_touch_session(self, last_seen_at: datetime | None, *, now: datetime | None = None) -> bool:
+        interval_seconds = max(0, int(self.settings.auth_touch_interval_seconds))
+        if interval_seconds == 0 or last_seen_at is None:
+            return True
+
+        reference_time = now or datetime.now(UTC)
+        normalized_last_seen_at = last_seen_at if last_seen_at.tzinfo is not None else last_seen_at.replace(tzinfo=UTC)
+        return (reference_time - normalized_last_seen_at) >= timedelta(seconds=interval_seconds)
+
     def get_session_user(self, session_token: str | None) -> AuthenticatedUser | None:
         if not session_token:
             return None
@@ -147,7 +156,8 @@ class PostgresAuthStore:
                         users.username,
                         users.display_name,
                         users.title,
-                        sessions.expires_at
+                        sessions.expires_at,
+                        sessions.last_seen_at
                     FROM app_sessions AS sessions
                     INNER JOIN app_users AS users
                         ON users.id = sessions.user_id
@@ -162,10 +172,11 @@ class PostgresAuthStore:
                     conn.commit()
                     return None
 
-                cur.execute(
-                    "UPDATE app_sessions SET last_seen_at = NOW() WHERE token_hash = %s",
-                    (token_hash,),
-                )
+                if self._should_touch_session(row.get("last_seen_at")):
+                    cur.execute(
+                        "UPDATE app_sessions SET last_seen_at = NOW() WHERE token_hash = %s",
+                        (token_hash,),
+                    )
             conn.commit()
 
         return AuthenticatedUser(

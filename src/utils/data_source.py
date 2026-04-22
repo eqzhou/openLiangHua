@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.utils.io import load_yaml, project_root
+from src.app.repositories.config_repository import load_universe_config
+from src.utils.io import project_root
 
 SUPPORTED_DATA_SOURCES = {"akshare", "tushare", "myquant"}
 SOURCE_ALIASES = {
@@ -25,7 +26,7 @@ def source_aliases(value: str | None) -> tuple[str, ...]:
 
 
 def active_data_source() -> str:
-    config = load_yaml(project_root() / "config" / "universe.yaml")
+    config = load_universe_config(project_root(), prefer_database=True)
     return normalize_data_source(config.get("data_source", "akshare"))
 
 

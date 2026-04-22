@@ -41,10 +41,9 @@ CONFIG_LABEL_COL_LABEL = "标签周期"
 CONFIG_TOP_N_LABEL = "候选股票数量 (Top N)"
 CONFIG_SUBMIT_LABEL = "保存研究参数"
 CONFIG_INVALID_DATES_MESSAGE = "日期顺序不合法，请确认：训练起始 <= 训练截止 <= 验证截止 <= 测试截止。"
-CONFIG_SAVE_SUCCESS_MESSAGE = "研究参数已保存到 config/experiment.yaml。"
+CONFIG_SAVE_SUCCESS_MESSAGE = "研究参数已保存到数据库配置。"
 
 SIDEBAR_ACTIONS_HEADER = "研究操作"
 CLEAR_CACHE_LABEL = "清空页面缓存"
 CLEAR_CACHE_SUCCESS_MESSAGE = "页面缓存已清空。"
 CURRENT_CONFIG_PREFIX = "当前研究参数："
-

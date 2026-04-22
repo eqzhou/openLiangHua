@@ -37,7 +37,14 @@ META_COLUMNS = {
 
 def load_dataset() -> tuple[pd.DataFrame, dict]:
     workspace = resolve_model_workspace()
-    return build_model_panel(workspace), workspace.experiment
+    return (
+        build_model_panel(
+            workspace,
+            date_from=str(workspace.experiment["train_start"]),
+            date_to=str(workspace.experiment["test_end"]),
+        ),
+        workspace.experiment,
+    )
 
 
 def split_dataset(panel: pd.DataFrame, experiment: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:

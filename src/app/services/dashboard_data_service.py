@@ -16,10 +16,13 @@ from src.app.repositories.report_repository import (
     load_daily_bar as repo_load_daily_bar,
     load_dataset_summary as repo_load_dataset_summary,
     load_diagnostic_table as repo_load_diagnostic_table,
+    load_feature_history_for_symbol as repo_load_feature_history_for_symbol,
     load_feature_importance as repo_load_feature_importance,
     load_feature_panel as repo_load_feature_panel,
     load_latest_symbol_markdown as repo_load_latest_symbol_markdown,
     load_metrics as repo_load_metrics,
+    load_overlay_candidate_record as repo_load_overlay_candidate_record,
+    load_overlay_candidate_summary_records as repo_load_overlay_candidate_summary_records,
     load_overlay_brief as repo_load_overlay_brief,
     load_overlay_candidates as repo_load_overlay_candidates,
     load_overlay_inference_brief as repo_load_overlay_inference_brief,
@@ -29,8 +32,13 @@ from src.app.repositories.report_repository import (
     load_overlay_inference_packet as repo_load_overlay_inference_packet,
     load_overlay_packet as repo_load_overlay_packet,
     load_portfolio as repo_load_portfolio,
+    load_prediction_history_for_symbol as repo_load_prediction_history_for_symbol,
     load_predictions as repo_load_predictions,
     load_stability as repo_load_stability,
+    load_watchlist_record as repo_load_watchlist_record,
+    load_watchlist_overview as repo_load_watchlist_overview,
+    load_watchlist_filtered_count as repo_load_watchlist_filtered_count,
+    load_watchlist_summary_records as repo_load_watchlist_summary_records,
 )
 from src.app.services.dashboard_snapshot_service import (
     build_candidate_snapshot as snapshot_build_candidate_snapshot,
@@ -443,12 +451,24 @@ def load_feature_panel() -> pd.DataFrame:
     return repo_load_feature_panel(ROOT, data_source=_current_data_source())
 
 
+def load_feature_history_for_symbol(symbol: str, factor_name: str) -> pd.DataFrame:
+    return repo_load_feature_history_for_symbol(ROOT, data_source=_current_data_source(), symbol=symbol, factor_name=factor_name)
+
+
 def load_daily_bar() -> pd.DataFrame:
     return repo_load_daily_bar(ROOT, data_source=_current_data_source())
 
 
 def load_overlay_candidates() -> pd.DataFrame:
     return repo_load_overlay_candidates(ROOT, data_source=_current_data_source())
+
+
+def load_overlay_candidate_summary_records(scope: str, field_names: list[str]) -> list[dict[str, object]]:
+    return repo_load_overlay_candidate_summary_records(ROOT, data_source=_current_data_source(), scope=scope, field_names=field_names)
+
+
+def load_overlay_candidate_record(scope: str, symbol: str, field_names: list[str] | None = None) -> dict[str, object]:
+    return repo_load_overlay_candidate_record(ROOT, data_source=_current_data_source(), scope=scope, symbol=symbol, field_names=field_names)
 
 
 def load_overlay_packet() -> dict:
@@ -488,6 +508,16 @@ def load_overlay_llm_bundle(scope: str) -> dict[str, object]:
 
 def load_predictions(model_name: str, split_name: str) -> pd.DataFrame:
     return repo_load_predictions(ROOT, data_source=_current_data_source(), model_name=model_name, split_name=split_name)
+
+
+def load_prediction_history_for_symbol(model_name: str, split_name: str, symbol: str) -> pd.DataFrame:
+    return repo_load_prediction_history_for_symbol(
+        ROOT,
+        data_source=_current_data_source(),
+        model_name=model_name,
+        split_name=split_name,
+        symbol=symbol,
+    )
 
 
 def build_candidate_snapshot(model_name: str, split_name: str) -> pd.DataFrame:
@@ -534,6 +564,39 @@ def load_stability(model_name: str) -> dict:
 
 def load_latest_symbol_markdown(symbol: str, note_kind: str) -> dict[str, str]:
     return repo_load_latest_symbol_markdown(symbol, note_kind, root=ROOT, data_source=_current_data_source())
+
+
+def load_watchlist_summary_records(
+    field_names: list[str],
+    *,
+    keyword: str = "",
+    scope: str = "all",
+    sort_by: str = "inference_rank",
+    page: int = 1,
+    page_size: int = 30,
+) -> list[dict[str, object]]:
+    return repo_load_watchlist_summary_records(
+        ROOT,
+        data_source=_current_data_source(),
+        field_names=field_names,
+        keyword=keyword,
+        scope=scope,
+        sort_by=sort_by,
+        page=page,
+        page_size=page_size,
+    )
+
+
+def load_watchlist_record(symbol: str, field_names: list[str] | None = None) -> dict[str, object]:
+    return repo_load_watchlist_record(ROOT, data_source=_current_data_source(), symbol=symbol, field_names=field_names)
+
+
+def load_watchlist_overview() -> dict[str, object]:
+    return repo_load_watchlist_overview(ROOT, data_source=_current_data_source())
+
+
+def load_watchlist_filtered_count(*, keyword: str = "", scope: str = "all") -> int:
+    return repo_load_watchlist_filtered_count(ROOT, data_source=_current_data_source(), keyword=keyword, scope=scope)
 
 
 def build_metrics_table() -> pd.DataFrame:

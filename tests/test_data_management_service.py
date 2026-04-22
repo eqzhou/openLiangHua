@@ -52,13 +52,14 @@ class DataManagementServiceTests(unittest.TestCase):
         self.assertFalse(payload["sourceMismatch"])
         self.assertTrue(payload["tokenConfigured"])
         self.assertTrue(payload["envFileExists"])
+        self.assertIn("researchPanel", payload)
         self.assertEqual(payload["dailyBar"]["latestTradeDate"], "2026-04-16")
         self.assertEqual(payload["dailyBar"]["rowCount"], 3)
         self.assertEqual(payload["dailyBar"]["symbolCount"], 2)
-        self.assertEqual(payload["featurePanel"]["latestTradeDate"], "2026-04-16")
-        self.assertEqual(payload["featurePanel"]["rowCount"], 2)
-        self.assertEqual(payload["labelPanel"]["latestTradeDate"], "2026-04-16")
-        self.assertEqual(payload["labelPanel"]["rowCount"], 2)
+        self.assertEqual(payload["legacyFeatureView"]["latestTradeDate"], "2026-04-16")
+        self.assertEqual(payload["legacyFeatureView"]["rowCount"], 2)
+        self.assertEqual(payload["legacyLabelView"]["latestTradeDate"], "2026-04-16")
+        self.assertEqual(payload["legacyLabelView"]["rowCount"], 2)
         self.assertEqual(payload["envPath"], ".env")
         self.assertIn("refresh_daily_bar_tushare.ps1", payload["scripts"]["incremental"])
         self.assertIn("refresh_full_pipeline_tushare.ps1", payload["scripts"]["fullRefresh"])
@@ -127,3 +128,21 @@ class DataManagementServiceTests(unittest.TestCase):
         self.assertEqual(payload["activeDataSource"], "akshare")
         self.assertEqual(payload["targetSource"], "akshare")
         self.assertTrue(payload["sourceMismatch"])
+
+    def test_build_data_management_payload_skips_full_daily_bar_load_for_primary_database_mode(self) -> None:
+        from src.app.services.data_management_service import build_data_management_payload
+
+        with (
+            patch("src.app.services.data_management_service._use_database_artifacts", return_value=True),
+            patch("src.app.services.data_management_service.load_daily_bar", side_effect=AssertionError("should not load full daily bar")),
+            patch("src.app.services.data_management_service.load_dataset_summary", return_value={"date_max": "2026-04-16"}),
+            patch("src.app.services.data_management_service.get_artifact_metadata", return_value={"updated_at": "2026-04-16T00:00:00"}),
+            patch("src.app.services.data_management_service.load_latest_successful_panel_run", return_value={}),
+            patch("src.app.services.data_management_service.load_research_panel_summary", return_value={}),
+            patch("src.app.services.data_management_service.load_stock_bar_summary_from_market_database", return_value={"rowCount": 3, "symbolCount": 2, "latestTradeDate": "2026-04-16"}),
+        ):
+            payload = build_data_management_payload(root=Path("/Users/eqzhou/Public/openLiangHua"), target_source="akshare")
+
+        self.assertEqual(payload["dailyBar"]["rowCount"], 3)
+        self.assertEqual(payload["dailyBar"]["symbolCount"], 2)
+        self.assertEqual(payload["dailyBar"]["latestTradeDate"], "2026-04-16")

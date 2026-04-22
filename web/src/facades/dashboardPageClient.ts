@@ -28,6 +28,7 @@ export interface CandidatesPageParams {
   model: string
   split: string
   topN: number
+  page: number
   symbol: string
 }
 
@@ -35,6 +36,7 @@ export interface WatchlistPageParams {
   keyword: string
   scope: string
   sortBy: string
+  page: number
   symbol: string
 }
 
@@ -52,6 +54,22 @@ export const overviewPageClient: SearchPageClient<OverviewPageParams> = {
   }),
   queryKey: (params) => ['overview', params.split],
   path: (params) => buildApiPath('/api/overview', { split_name: params.split }),
+}
+
+export const overviewSummaryClient = {
+  queryKey: (params: OverviewPageParams): QueryKey => ['overview-summary', params.split],
+  path: (params: OverviewPageParams): string =>
+    buildApiPath('/api/overview/summary', {
+      split_name: params.split,
+    }),
+}
+
+export const overviewCurvesClient = {
+  queryKey: (params: OverviewPageParams): QueryKey => ['overview-curves', params.split],
+  path: (params: OverviewPageParams): string =>
+    buildApiPath('/api/overview/curves', {
+      split_name: params.split,
+    }),
 }
 
 export const factorExplorerPageClient: SearchPageClient<FactorExplorerPageParams> = {
@@ -116,36 +134,67 @@ export const modelBacktestPageClient: SearchPageClient<ModelBacktestPageParams> 
     }),
 }
 
+export const modelBacktestSummaryClient = {
+  queryKey: (params: ModelBacktestPageParams): QueryKey => ['backtests-summary', params.model, params.split],
+  path: (params: ModelBacktestPageParams): string =>
+    buildApiPath('/api/backtests/summary', {
+      model_name: params.model,
+      split_name: params.split,
+    }),
+}
+
+export const modelBacktestPortfolioClient = {
+  queryKey: (params: ModelBacktestPageParams): QueryKey => ['backtests-portfolio', params.model, params.split],
+  path: (params: ModelBacktestPageParams): string =>
+    buildApiPath('/api/backtests/portfolio', {
+      model_name: params.model,
+      split_name: params.split,
+    }),
+}
+
+export const modelBacktestDiagnosticsClient = {
+  queryKey: (params: ModelBacktestPageParams): QueryKey => ['backtests-diagnostics', params.model, params.split],
+  path: (params: ModelBacktestPageParams): string =>
+    buildApiPath('/api/backtests/diagnostics', {
+      model_name: params.model,
+      split_name: params.split,
+    }),
+}
+
 export const candidatesPageClient: SearchPageClient<CandidatesPageParams> = {
   readSearchParams: (searchParams) => ({
     model: readStringParam(searchParams, 'model', 'lgbm'),
     split: readStringParam(searchParams, 'split', 'test'),
-    topN: readClampedIntParam(searchParams, 'topN', { fallback: 10, min: 1, max: 100 }),
+    topN: readClampedIntParam(searchParams, 'topN', { fallback: 30, min: 1, max: 100 }),
+    page: readClampedIntParam(searchParams, 'page', { fallback: 1, min: 1, max: 9999 }),
     symbol: readStringParam(searchParams, 'symbol'),
   }),
   toSearchUpdates: (updates) => ({
     model: updates.model,
     split: updates.split,
     topN: updates.topN,
+    page: updates.page,
     symbol: updates.symbol,
   }),
-  queryKey: (params) => ['candidates', params.model, params.split, params.topN, params.symbol],
+  queryKey: (params) => ['candidates', params.model, params.split, params.topN, params.page, params.symbol],
   path: (params) =>
     buildApiPath('/api/candidates', {
       model_name: params.model,
       split_name: params.split,
       top_n: params.topN,
+      page: params.page,
       symbol: params.symbol,
     }),
 }
 
 export const candidatesSummaryClient = {
-  queryKey: (params: CandidatesPageParams): QueryKey => ['candidates-summary', params.model, params.split, params.topN, params.symbol],
+  queryKey: (params: CandidatesPageParams): QueryKey => ['candidates-summary', params.model, params.split, params.topN, params.page, params.symbol],
   path: (params: CandidatesPageParams): string =>
     buildApiPath('/api/candidates/summary', {
       model_name: params.model,
       split_name: params.split,
       top_n: params.topN,
+      page: params.page,
       symbol: params.symbol,
     }),
 }
@@ -154,6 +203,16 @@ export const candidateHistoryClient = {
   queryKey: (params: CandidatesPageParams, symbol: string): QueryKey => ['candidates-history', params.model, params.split, symbol],
   path: (params: CandidatesPageParams, symbol: string): string =>
     buildApiPath('/api/candidates/history', {
+      model_name: params.model,
+      split_name: params.split,
+      symbol,
+    }),
+}
+
+export const candidateDetailClient = {
+  queryKey: (params: CandidatesPageParams, symbol: string): QueryKey => ['candidates-detail', params.model, params.split, symbol],
+  path: (params: CandidatesPageParams, symbol: string): string =>
+    buildApiPath('/api/candidates/detail', {
       model_name: params.model,
       split_name: params.split,
       symbol,
@@ -169,20 +228,23 @@ export const watchlistPageClient: SearchPageClient<WatchlistPageParams> & {
     keyword: readStringParam(searchParams, 'keyword'),
     scope: readStringParam(searchParams, 'scope', 'all'),
     sortBy: readStringParam(searchParams, 'sortBy', 'inference_rank'),
+    page: readClampedIntParam(searchParams, 'page', { fallback: 1, min: 1, max: 9999 }),
     symbol: readStringParam(searchParams, 'symbol'),
   }),
   toSearchUpdates: (updates) => ({
     keyword: updates.keyword,
     scope: updates.scope,
     sortBy: updates.sortBy,
+    page: updates.page,
     symbol: updates.symbol,
   }),
-  queryKey: (params) => ['watchlist', params.keyword, params.scope, params.sortBy, params.symbol],
+  queryKey: (params) => ['watchlist', params.keyword, params.scope, params.sortBy, params.page, params.symbol],
   path: (params) =>
     buildApiPath('/api/watchlist', {
       keyword: params.keyword,
       scope: params.scope,
       sort_by: params.sortBy,
+      page: params.page,
       symbol: params.symbol,
     }),
   realtimePath: (params) =>
@@ -190,6 +252,7 @@ export const watchlistPageClient: SearchPageClient<WatchlistPageParams> & {
       keyword: params.keyword,
       scope: params.scope,
       sort_by: params.sortBy,
+      page: params.page,
       symbol: params.symbol,
       include_realtime: true,
     }),
@@ -198,12 +261,13 @@ export const watchlistPageClient: SearchPageClient<WatchlistPageParams> & {
 }
 
 export const watchlistSummaryClient = {
-  queryKey: (params: WatchlistPageParams): QueryKey => ['watchlist-summary', params.keyword, params.scope, params.sortBy, params.symbol],
+  queryKey: (params: WatchlistPageParams): QueryKey => ['watchlist-summary', params.keyword, params.scope, params.sortBy, params.page, params.symbol],
   path: (params: WatchlistPageParams): string =>
     buildApiPath('/api/watchlist/summary', {
       keyword: params.keyword,
       scope: params.scope,
       sort_by: params.sortBy,
+      page: params.page,
       symbol: params.symbol,
     }),
   realtimePath: (params: WatchlistPageParams): string =>
@@ -211,6 +275,7 @@ export const watchlistSummaryClient = {
       keyword: params.keyword,
       scope: params.scope,
       sort_by: params.sortBy,
+      page: params.page,
       symbol: params.symbol,
       include_realtime: true,
     }),
@@ -281,6 +346,26 @@ export const realtimeRefreshClient = {
 export const homePageClient = {
   queryKey: (): QueryKey => ['home-page'],
   path: (): string => '/api/home',
+}
+
+export const homeSummaryClient = {
+  queryKey: (): QueryKey => ['home-summary'],
+  path: (): string => '/api/home/summary',
+}
+
+export const homeWatchlistClient = {
+  queryKey: (): QueryKey => ['home-watchlist'],
+  path: (): string => '/api/home/watchlist',
+}
+
+export const homeCandidatesClient = {
+  queryKey: (): QueryKey => ['home-candidates'],
+  path: (): string => '/api/home/candidates',
+}
+
+export const homeAiReviewClient = {
+  queryKey: (): QueryKey => ['home-ai-review'],
+  path: (): string => '/api/home/ai-review',
 }
 
 export const shellClient = {

@@ -16,6 +16,7 @@ import { useToast } from '../components/ToastProvider'
 import { WorkspaceHero } from '../components/WorkspaceHero'
 import { realtimeRefreshClient, servicePageClient } from '../facades/dashboardPageClient'
 import { formatDateTime, formatValue, recordToFieldRows } from '../lib/format'
+import { SERVICE_REFETCH_INTERVAL_MS } from '../lib/polling'
 import { describeRealtimeSnapshotMode, describeRealtimeSource, formatRealtimeCoverage, normalizeRealtimeFailedSymbols } from '../lib/realtime'
 import type { JsonRecord, RealtimeRefreshPayload, ServicePayload } from '../types/api'
 
@@ -54,7 +55,7 @@ export function ServicePage({ authenticated = false }: ServicePageProps) {
   const serviceQuery = useQuery({
     queryKey: servicePageClient.queryKey(),
     queryFn: () => apiGet<ServicePayload>(servicePageClient.path()),
-    refetchInterval: 15_000,
+    refetchInterval: SERVICE_REFETCH_INTERVAL_MS,
   })
 
   const refreshRealtimeMutation = useMutation({

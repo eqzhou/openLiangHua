@@ -6,6 +6,7 @@ import { ApiError, apiGet, apiPost, apiPut } from './api/client'
 import { ThemeProvider } from './components/ThemeProvider'
 import { ToastProvider, useToast } from './components/ToastProvider'
 import { shellClient } from './facades/dashboardPageClient'
+import { AUTH_SESSION_REFETCH_INTERVAL_MS, SHELL_REFETCH_INTERVAL_MS } from './lib/polling'
 import { copyShareablePageLink } from './lib/shareLinks'
 import { clearUiPreferences, resolveInitialTheme } from './lib/uiPreferences'
 import { AppLayout } from './layout/AppLayout'
@@ -18,8 +19,11 @@ const OverviewPage = lazy(() => import('./pages/OverviewPage').then((module) => 
 const FactorExplorerPage = lazy(() => import('./pages/FactorExplorerPage').then((module) => ({ default: module.FactorExplorerPage })))
 const ModelBacktestPage = lazy(() => import('./pages/ModelBacktestPage').then((module) => ({ default: module.ModelBacktestPage })))
 const CandidatesPage = lazy(() => import('./pages/CandidatesPage').then((module) => ({ default: module.CandidatesPage })))
+const CandidateDetailPage = lazy(() => import('./pages/CandidateDetailPage').then((module) => ({ default: module.CandidateDetailPage })))
 const WatchlistPage = lazy(() => import('./pages/WatchlistPage').then((module) => ({ default: module.WatchlistPage })))
+const WatchlistDetailPage = lazy(() => import('./pages/WatchlistDetailPage').then((module) => ({ default: module.WatchlistDetailPage })))
 const AiReviewPage = lazy(() => import('./pages/AiReviewPage').then((module) => ({ default: module.AiReviewPage })))
+const AiReviewDetailPage = lazy(() => import('./pages/AiReviewDetailPage').then((module) => ({ default: module.AiReviewDetailPage })))
 const DataManagementPage = lazy(() => import('./pages/DataManagementPage').then((module) => ({ default: module.DataManagementPage })))
 const ServicePage = lazy(() => import('./pages/ServicePage').then((module) => ({ default: module.ServicePage })))
 
@@ -48,13 +52,13 @@ function DashboardApp() {
   const authSessionQuery = useQuery({
     queryKey: ['auth', 'session'],
     queryFn: () => apiGet<AuthSessionPayload>('/api/auth/session'),
-    refetchInterval: 60_000,
+    refetchInterval: AUTH_SESSION_REFETCH_INTERVAL_MS,
   })
 
   const shellQuery = useQuery({
     queryKey: shellClient.queryKey(),
     queryFn: () => apiGet<ShellPayload>(shellClient.path()),
-    refetchInterval: 15_000,
+    refetchInterval: SHELL_REFETCH_INTERVAL_MS,
   })
 
   const loginMutation = useMutation({
@@ -258,8 +262,11 @@ function DashboardApp() {
           <Route path="/factors" element={<FactorExplorerPage />} />
           <Route path="/backtests" element={<ModelBacktestPage bootstrap={shellQuery.data?.bootstrap} />} />
           <Route path="/candidates" element={<CandidatesPage bootstrap={shellQuery.data?.bootstrap} />} />
+          <Route path="/candidates/:symbol" element={<CandidateDetailPage />} />
           <Route path="/watchlist" element={<WatchlistPage bootstrap={shellQuery.data?.bootstrap} authenticated={isAuthenticated} />} />
+          <Route path="/watchlist/:symbol" element={<WatchlistDetailPage authenticated={isAuthenticated} />} />
           <Route path="/ai-review" element={<AiReviewPage />} />
+          <Route path="/ai-review/:scope/:symbol" element={<AiReviewDetailPage />} />
           <Route path="/data" element={<DataManagementPage authenticated={isAuthenticated} />} />
           <Route path="/service" element={<ServicePage authenticated={isAuthenticated} />} />
         </Routes>

@@ -730,7 +730,7 @@ def build_overlay_report_from_frames(
 
 def build_overlay_report() -> tuple[pd.DataFrame, dict, str]:
     root = project_root()
-    experiment = load_experiment_config(root, prefer_database=False)
+    experiment = load_experiment_config(root, prefer_database=True)
     data_source = active_data_source()
     overlay = _overlay_config(experiment)
     split_name = str(overlay["split"])

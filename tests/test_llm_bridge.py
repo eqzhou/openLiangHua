@@ -9,6 +9,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.agents.llm_bridge import export_llm_requests
+from src.db.dashboard_artifact_keys import (
+    llm_bridge_export_artifact_key,
+    overlay_llm_response_summary_artifact_key,
+    overlay_llm_responses_artifact_key,
+)
+from src.db.dashboard_artifact_store import get_dashboard_artifact_store
 
 
 TEST_TMP_ROOT = Path(__file__).resolve().parent / ".tmp"
@@ -92,6 +98,12 @@ class LlmBridgeTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.case_root, ignore_errors=True)
 
+    def _artifact_text(self, artifact_key: str) -> str:
+        artifact = get_dashboard_artifact_store().get_artifact(artifact_key)
+        self.assertIsNotNone(artifact)
+        assert artifact is not None
+        return str(artifact.payload_text or "")
+
     def test_export_llm_requests_stays_export_only_without_api_key(self) -> None:
         env = {
             "OVERLAY_LLM_ENABLED": "true",
@@ -109,9 +121,17 @@ class LlmBridgeTests(unittest.TestCase):
         self.assertEqual(artifacts["request_count"], 1)
         self.assertEqual(artifacts["response_count"], 0)
         self.assertIn("OPENAI_API_KEY", artifacts["blocking_reason"])
-        self.assertTrue(Path(artifacts["jsonl_path"]).exists())
-        self.assertTrue(Path(artifacts["summary_path"]).exists())
-        self.assertTrue(Path(artifacts["response_summary_path"]).exists())
+        self.assertEqual(artifacts["jsonl_path"], "artifact://myquant:text:overlay_llm_requests")
+        self.assertEqual(artifacts["summary_path"], "artifact://myquant:text:overlay_llm_summary")
+        self.assertEqual(artifacts["response_summary_path"], "artifact://myquant:text:overlay_llm_response_summary")
+        self.assertIn(
+            "000078.SZ",
+            self._artifact_text(llm_bridge_export_artifact_key("myquant", "overlay_llm", "requests")),
+        )
+        self.assertIn(
+            "OPENAI_API_KEY",
+            self._artifact_text(llm_bridge_export_artifact_key("myquant", "overlay_llm", "summary")),
+        )
         self.assertEqual(artifacts["response_jsonl_path"], "")
 
     def test_export_llm_requests_executes_openai_when_ready(self) -> None:
@@ -146,11 +166,12 @@ class LlmBridgeTests(unittest.TestCase):
         self.assertEqual(payload["reasoning"], {"effort": "low", "summary": "auto"})
         self.assertEqual(payload["max_output_tokens"], 900)
         self.assertIn("[SYSTEM]", payload["input"])
-        self.assertIn("000078.SZ", Path(artifacts["response_summary_path"]).read_text(encoding="utf-8"))
-
-        response_path = Path(artifacts["response_jsonl_path"])
-        self.assertTrue(response_path.exists())
-        records = [json.loads(line) for line in response_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertIn(
+            "000078.SZ",
+            self._artifact_text(overlay_llm_response_summary_artifact_key("myquant", "inference")),
+        )
+        response_text = self._artifact_text(overlay_llm_responses_artifact_key("myquant", "inference"))
+        records = [json.loads(line) for line in response_text.splitlines() if line.strip()]
         self.assertEqual(records[0]["custom_id"], "000078.SZ")
         self.assertEqual(records[0]["status"], "success")
         self.assertEqual(records[0]["output_text"], "外部模型自动研讨结论")
@@ -185,11 +206,12 @@ class LlmBridgeTests(unittest.TestCase):
         self.assertEqual(payload["model"], "gpt-5.4")
         self.assertEqual(payload["messages"][0]["role"], "system")
         self.assertEqual(payload["messages"][1]["role"], "user")
-        self.assertIn("000078.SZ", Path(artifacts["response_summary_path"]).read_text(encoding="utf-8"))
-
-        response_path = Path(artifacts["response_jsonl_path"])
-        self.assertTrue(response_path.exists())
-        records = [json.loads(line) for line in response_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertIn(
+            "000078.SZ",
+            self._artifact_text(overlay_llm_response_summary_artifact_key("myquant", "inference")),
+        )
+        response_text = self._artifact_text(overlay_llm_responses_artifact_key("myquant", "inference"))
+        records = [json.loads(line) for line in response_text.splitlines() if line.strip()]
         self.assertEqual(records[0]["output_text"], "兼容代理自动研讨结论")
 
 

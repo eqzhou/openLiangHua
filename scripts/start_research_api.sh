@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-API_PORT="${API_PORT:-8001}"
+API_PORT="${API_PORT:-8989}"
 
 choose_python() {
   local candidates=(

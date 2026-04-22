@@ -107,7 +107,7 @@ def render_watchlist_page(
 ) -> None:
     st.subheader("观察池与持仓")
     if watchlist_view.empty:
-        st.warning("当前还没有配置观察池股票。你可以在 config/watchlist.yaml 里添加持仓或关注股票。")
+        st.warning("当前还没有配置观察池股票。请先在数据库配置中添加持仓或关注股票。")
         return
 
     st.markdown("**观察池总览**")
@@ -393,7 +393,7 @@ def render_watchlist_payload_page(
     realtime_status = dict(payload.get("realtimeStatus", {}) or {})
 
     if records.empty:
-        st.warning("当前还没有配置观察池股票。你可以在 config/watchlist.yaml 里添加持仓或关注股票。")
+        st.warning("当前还没有配置观察池股票。请先在数据库配置中添加持仓或关注股票。")
         return
 
     st.markdown("**观察池总览**")

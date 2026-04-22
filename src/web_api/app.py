@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
+from time import perf_counter
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -14,10 +16,14 @@ from src.app.facades.dashboard_facade import (
     clear_cache_payload,
     get_data_management_payload,
     get_candidate_history_payload,
+    get_candidate_detail_payload,
     generate_action_memo,
     generate_watch_plan,
     get_ai_review_payload,
     get_ai_review_summary_payload,
+    get_model_backtest_diagnostics_payload,
+    get_model_backtest_portfolio_payload,
+    get_model_backtest_summary_payload,
     get_bootstrap_payload,
     get_candidates_payload,
     get_candidates_summary_payload,
@@ -25,8 +31,14 @@ from src.app.facades.dashboard_facade import (
     get_factor_explorer_detail_payload,
     get_factor_explorer_payload,
     get_factor_explorer_summary_payload,
+    get_home_ai_review_section_payload,
+    get_home_candidates_section_payload,
     get_home_payload,
+    get_home_summary_payload,
+    get_home_watchlist_section_payload,
     get_model_backtest_payload,
+    get_overview_curves_payload,
+    get_overview_summary_payload,
     get_overview_payload,
     get_shell_payload,
     get_service_payload,
@@ -70,6 +82,15 @@ def _build_auth_payload(user: AuthenticatedUser | None) -> dict[str, Any]:
 
 settings = get_api_settings()
 app = FastAPI(title="OpenLianghua Research API", version="0.1.0")
+logger = logging.getLogger("openlianghua.web_api")
+LEGACY_AGGREGATE_PATHS = frozenset(
+    {
+        "/api/home",
+        "/api/overview",
+        "/api/backtests",
+        "/api/candidates",
+    }
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
@@ -77,6 +98,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def observe_api_requests(request: Request, call_next):
+    path = request.url.path
+    if not path.startswith("/api/"):
+        return await call_next(request)
+
+    started_at = perf_counter()
+    response = await call_next(request)
+    duration_ms = round((perf_counter() - started_at) * 1000, 2)
+    content_length = response.headers.get("content-length", "")
+    legacy_aggregate = path in LEGACY_AGGREGATE_PATHS
+
+    response.headers["X-OpenLianghua-Response-Ms"] = str(duration_ms)
+    if legacy_aggregate:
+        response.headers["X-OpenLianghua-Legacy-Aggregate"] = "true"
+
+    content_length_value = int(content_length) if content_length.isdigit() else -1
+    if legacy_aggregate or duration_ms >= 250 or content_length_value >= 50_000:
+        logger.info(
+            "api_request path=%s method=%s status=%s duration_ms=%.2f content_length=%s legacy_aggregate=%s",
+            path,
+            request.method,
+            response.status_code,
+            duration_ms,
+            content_length or "unknown",
+            legacy_aggregate,
+        )
+
+    return response
 
 
 @app.get("/api/meta")
@@ -134,6 +186,26 @@ def get_shell() -> dict[str, Any]:
 @app.get("/api/home")
 def get_home() -> dict[str, Any]:
     return get_home_payload()
+
+
+@app.get("/api/home/summary")
+def get_home_summary() -> dict[str, Any]:
+    return get_home_summary_payload()
+
+
+@app.get("/api/home/watchlist")
+def get_home_watchlist() -> dict[str, Any]:
+    return get_home_watchlist_section_payload()
+
+
+@app.get("/api/home/candidates")
+def get_home_candidates() -> dict[str, Any]:
+    return get_home_candidates_section_payload()
+
+
+@app.get("/api/home/ai-review")
+def get_home_ai_review() -> dict[str, Any]:
+    return get_home_ai_review_section_payload()
 
 
 @app.get("/api/config/experiment")
@@ -228,6 +300,18 @@ def get_overview(split_name: str = Query("test")) -> dict[str, Any]:
     return get_overview_payload(normalized_split)
 
 
+@app.get("/api/overview/summary")
+def get_overview_summary(split_name: str = Query("test")) -> dict[str, Any]:
+    normalized_split = split_name if split_name in SPLITS else "test"
+    return get_overview_summary_payload(normalized_split)
+
+
+@app.get("/api/overview/curves")
+def get_overview_curves(split_name: str = Query("test")) -> dict[str, Any]:
+    normalized_split = split_name if split_name in SPLITS else "test"
+    return get_overview_curves_payload(normalized_split)
+
+
 @app.get("/api/factors")
 def get_factors(
     factor_name: str | None = Query(None),
@@ -277,11 +361,42 @@ def get_backtests(
     return get_model_backtest_payload(model_name=normalized_model, split_name=normalized_split)
 
 
+@app.get("/api/backtests/summary")
+def get_backtests_summary(
+    model_name: str = Query("lgbm"),
+    split_name: str = Query("test"),
+) -> dict[str, Any]:
+    normalized_model = model_name if model_name in MODEL_NAMES else "lgbm"
+    normalized_split = split_name if split_name in SPLITS else "test"
+    return get_model_backtest_summary_payload(model_name=normalized_model, split_name=normalized_split)
+
+
+@app.get("/api/backtests/portfolio")
+def get_backtests_portfolio(
+    model_name: str = Query("lgbm"),
+    split_name: str = Query("test"),
+) -> dict[str, Any]:
+    normalized_model = model_name if model_name in MODEL_NAMES else "lgbm"
+    normalized_split = split_name if split_name in SPLITS else "test"
+    return get_model_backtest_portfolio_payload(model_name=normalized_model, split_name=normalized_split)
+
+
+@app.get("/api/backtests/diagnostics")
+def get_backtests_diagnostics(
+    model_name: str = Query("lgbm"),
+    split_name: str = Query("test"),
+) -> dict[str, Any]:
+    normalized_model = model_name if model_name in MODEL_NAMES else "lgbm"
+    normalized_split = split_name if split_name in SPLITS else "test"
+    return get_model_backtest_diagnostics_payload(model_name=normalized_model, split_name=normalized_split)
+
+
 @app.get("/api/candidates")
 def get_candidates(
     model_name: str = Query("lgbm"),
     split_name: str = Query("test"),
-    top_n: int = Query(10, ge=1, le=100),
+    top_n: int = Query(30, ge=1, le=100),
+    page: int = Query(1, ge=1, le=9999),
     symbol: str | None = Query(None),
 ) -> dict[str, Any]:
     normalized_model = model_name if model_name in MODEL_NAMES else "lgbm"
@@ -290,6 +405,7 @@ def get_candidates(
         model_name=normalized_model,
         split_name=normalized_split,
         top_n=top_n,
+        page=page,
         symbol=symbol,
     )
 
@@ -298,7 +414,8 @@ def get_candidates(
 def get_candidates_summary(
     model_name: str = Query("lgbm"),
     split_name: str = Query("test"),
-    top_n: int = Query(10, ge=1, le=100),
+    top_n: int = Query(30, ge=1, le=100),
+    page: int = Query(1, ge=1, le=9999),
     symbol: str | None = Query(None),
 ) -> dict[str, Any]:
     normalized_model = model_name if model_name in MODEL_NAMES else "lgbm"
@@ -307,6 +424,7 @@ def get_candidates_summary(
         model_name=normalized_model,
         split_name=normalized_split,
         top_n=top_n,
+        page=page,
         symbol=symbol,
     )
 
@@ -326,11 +444,27 @@ def get_candidates_history(
     )
 
 
+@app.get("/api/candidates/detail")
+def get_candidates_detail(
+    model_name: str = Query("lgbm"),
+    split_name: str = Query("test"),
+    symbol: str | None = Query(None),
+) -> dict[str, Any]:
+    normalized_model = model_name if model_name in MODEL_NAMES else "lgbm"
+    normalized_split = split_name if split_name in SPLITS else "test"
+    return get_candidate_detail_payload(
+        model_name=normalized_model,
+        split_name=normalized_split,
+        symbol=symbol,
+    )
+
+
 @app.get("/api/watchlist")
 def get_watchlist(
     keyword: str = Query(""),
     scope: str = Query("all"),
     sort_by: str = Query("inference_rank"),
+    page: int = Query(1, ge=1, le=9999),
     symbol: str | None = Query(None),
     include_realtime: bool = Query(False),
     user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
@@ -341,6 +475,7 @@ def get_watchlist(
         keyword=keyword,
         scope=scope,
         sort_by=sort_by,
+        page=page,
         symbol=symbol,
         include_realtime=include_realtime,
     )
@@ -351,6 +486,7 @@ def get_watchlist_summary(
     keyword: str = Query(""),
     scope: str = Query("all"),
     sort_by: str = Query("inference_rank"),
+    page: int = Query(1, ge=1, le=9999),
     symbol: str | None = Query(None),
     include_realtime: bool = Query(False),
     user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
@@ -361,6 +497,7 @@ def get_watchlist_summary(
         keyword=keyword,
         scope=scope,
         sort_by=sort_by,
+        page=page,
         symbol=symbol,
         include_realtime=include_realtime,
     )

@@ -3,11 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.utils.io import load_yaml, project_root
+from src.app.repositories.config_repository import load_universe_config
+from src.utils.io import project_root
 
 
 def _default_benchmark_code() -> str | None:
-    config = load_yaml(project_root() / "config" / "universe.yaml")
+    config = load_universe_config(project_root(), prefer_database=True)
     benchmark_code = config.get("benchmark") or config.get("index_code")
     if benchmark_code:
         return str(benchmark_code)

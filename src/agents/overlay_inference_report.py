@@ -42,7 +42,7 @@ def _load_prediction_frame(root, data_source: str, filename: str) -> pd.DataFram
 def run() -> None:
     root = project_root()
     reports_dir = ensure_dir(root / "reports" / "weekly")
-    experiment = load_experiment_config(root, prefer_database=False)
+    experiment = load_experiment_config(root, prefer_database=True)
     data_source = active_data_source()
     overlay = _overlay_config(experiment)
 
@@ -92,7 +92,7 @@ def run() -> None:
         data_source=data_source,
     )
     packet["shortlist"] = {
-        "source_path": shortlist_artifact["source_path"],
+        "artifact_ref": shortlist_artifact["artifact_ref"],
         "row_count": len(shortlist_artifact["rows"]),
     }
     repo_save_overlay_outputs(

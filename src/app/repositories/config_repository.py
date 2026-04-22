@@ -55,33 +55,40 @@ def _save_config_to_database(name: str, payload: dict[str, Any]) -> None:
         return
 
 
-def load_experiment_config(root: Path | None = None, *, prefer_database: bool = True) -> dict[str, Any]:
-    if prefer_database and _uses_primary_project_root(root):
-        database_payload = _load_config_from_database("experiment")
-        if database_payload is not None:
-            return database_payload
+def _load_primary_config(name: str, path: Path, *, default: dict[str, Any] | None = None) -> dict[str, Any]:
+    database_payload = _load_config_from_database(name)
+    if database_payload is not None:
+        return database_payload
+    payload = load_yaml_config(path, default=default)
+    if payload:
+        _save_config_to_database(name, payload)
+    return payload
 
+
+def load_experiment_config(root: Path | None = None, *, prefer_database: bool = True) -> dict[str, Any]:
     resolved_root = root or project_root()
+    if prefer_database and _uses_primary_project_root(root):
+        return _load_primary_config("experiment", resolved_root / "config" / "experiment.yaml")
     return load_yaml_config(resolved_root / "config" / "experiment.yaml")
 
 
 def save_experiment_config(payload: dict[str, Any], root: Path | None = None) -> None:
     resolved_root = root or project_root()
-    save_yaml_config(resolved_root / "config" / "experiment.yaml", payload)
     if _uses_primary_project_root(root):
         _save_config_to_database("experiment", payload)
+        return
+    save_yaml_config(resolved_root / "config" / "experiment.yaml", payload)
 
 
 def load_watchlist_config(root: Path | None = None, *, prefer_database: bool = True) -> dict[str, Any]:
-    if prefer_database and _uses_primary_project_root(root):
-        database_payload = _load_config_from_database("watchlist")
-        if database_payload is not None:
-            return database_payload
-
     resolved_root = root or project_root()
+    if prefer_database and _uses_primary_project_root(root):
+        return _load_primary_config("watchlist", resolved_root / "config" / "watchlist.yaml", default={"holdings": []})
     return load_yaml_config(resolved_root / "config" / "watchlist.yaml", default={"holdings": []})
 
 
-def load_universe_config(root: Path | None = None, *, prefer_database: bool = False) -> dict[str, Any]:
+def load_universe_config(root: Path | None = None, *, prefer_database: bool = True) -> dict[str, Any]:
     resolved_root = root or project_root()
+    if prefer_database and _uses_primary_project_root(root):
+        return _load_primary_config("universe", resolved_root / "config" / "universe.yaml", default={})
     return load_yaml_config(resolved_root / "config" / "universe.yaml", default={})

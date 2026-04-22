@@ -206,13 +206,13 @@ def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
 
     feature_quality_export = feature_quality.copy()
     if not feature_quality_export.empty:
-        quality_path = save_feature_quality_report(
+        quality_artifact_ref = save_feature_quality_report(
             resolved_root,
             data_source=data_source,
             filename="inference_feature_quality.csv",
             frame=feature_quality_export,
         )
-        quality_paths = {"source_path": str(quality_path)}
+        quality_paths = {"artifact_ref": str(quality_artifact_ref)}
     else:
         quality_paths = {}
 
@@ -251,8 +251,8 @@ def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
         },
     }
 
-    packet_path = save_inference_packet(resolved_root, data_source=data_source, payload=packet)
-    logger.info(f"Saved latest inference packet to {packet_path}")
+    packet_artifact_ref = save_inference_packet(resolved_root, data_source=data_source, payload=packet)
+    logger.info(f"Saved latest inference packet to {packet_artifact_ref}")
     return packet
 
 

@@ -31,7 +31,7 @@ WATCH_PLAN_FACTOR_COLUMNS = [
 
 def resolve_data_source(root: Path | None = None) -> str:
     resolved_root = root or project_root()
-    universe = load_universe_config(resolved_root, prefer_database=False)
+    universe = load_universe_config(resolved_root, prefer_database=True)
     return normalize_data_source(universe.get("data_source", "akshare"))
 
 

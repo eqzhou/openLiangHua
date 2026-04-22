@@ -5,7 +5,13 @@ import unittest
 import pandas as pd
 
 import src.app.services.realtime_quote_service as realtime_quote_service
-from src.app.services.realtime_quote_service import fetch_managed_realtime_quotes, fetch_realtime_quotes, merge_realtime_quotes
+from src.app.services.realtime_quote_service import (
+    fetch_managed_realtime_quotes,
+    fetch_realtime_quotes,
+    merge_realtime_quote_record,
+    merge_realtime_quote_records,
+    merge_realtime_quotes,
+)
 from src.db.realtime_quote_store import RealtimeQuoteSnapshot
 
 
@@ -297,6 +303,46 @@ class RealtimeQuoteServiceTests(unittest.TestCase):
         self.assertTrue(pd.isna(row["realtime_unrealized_pnl"]))
         self.assertTrue(pd.isna(row["realtime_unrealized_pnl_pct"]))
         self.assertTrue(pd.isna(row["realtime_vs_mark_pct"]))
+
+    def test_merge_realtime_quote_record_updates_single_record(self) -> None:
+        record = {
+            "ts_code": "000078.SZ",
+            "cost_basis": 3.851,
+            "shares": 15000,
+            "mark_price": 3.45,
+        }
+        realtime_quote = {
+            "ts_code": "000078.SZ",
+            "realtime_price": 3.80,
+            "realtime_time": pd.Timestamp("2026-04-02 09:31:00"),
+        }
+
+        merged = merge_realtime_quote_record(record, realtime_quote)
+
+        self.assertAlmostEqual(float(merged["realtime_market_value"]), 57000.0)
+        self.assertAlmostEqual(float(merged["realtime_unrealized_pnl"]), (3.80 - 3.851) * 15000)
+        self.assertAlmostEqual(float(merged["realtime_unrealized_pnl_pct"]), 3.80 / 3.851 - 1.0)
+        self.assertAlmostEqual(float(merged["realtime_vs_mark_pct"]), 3.80 / 3.45 - 1.0)
+
+    def test_merge_realtime_quote_records_updates_matching_symbols_only(self) -> None:
+        records = [
+            {"ts_code": "000001.SZ", "mark_price": 10.0},
+            {"ts_code": "000002.SZ", "mark_price": 8.0},
+        ]
+        realtime_quotes = pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "realtime_price": 10.5,
+                    "realtime_time": pd.Timestamp("2026-04-02 10:00:00"),
+                }
+            ]
+        )
+
+        merged = merge_realtime_quote_records(records, realtime_quotes)
+
+        self.assertAlmostEqual(float(merged[0]["realtime_price"]), 10.5)
+        self.assertNotIn("realtime_price", merged[1])
 
     def test_fetch_managed_realtime_quotes_reuses_post_close_snapshot_after_market_close(self) -> None:
         cached_quotes = pd.DataFrame(

@@ -51,6 +51,7 @@ interface DataTableProps {
   onRowClick?: (row: JsonRecord) => void
   selectedRowId?: string | null
   cellRenderers?: Record<string, (row: JsonRecord, column: string) => ReactNode>
+  rowTitle?: string
 }
 
 function clampWidth(value: number): number {
@@ -197,6 +198,7 @@ export function DataTable({
   onRowClick,
   selectedRowId = null,
   cellRenderers,
+  rowTitle,
 }: DataTableProps) {
   const location = useLocation()
   const resolvedColumns = useMemo(() => (columns && columns.length ? columns : Object.keys(rows[0] ?? {})), [columns, rows])
@@ -609,6 +611,7 @@ export function DataTable({
                   key={rowId}
                   className={`${onRowClick ? 'data-table__row--clickable' : ''}${isSelected ? ' data-table__row--selected' : ''}`}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  title={onRowClick ? rowTitle : undefined}
                 >
                   {safeColumns.map((column, columnIndex) => {
                     const width = columnWidths[column]
@@ -641,6 +644,7 @@ export function DataTable({
               key={rowId}
               className={`table-mobile-card${isSelected ? ' table-mobile-card--selected' : ''}${onRowClick ? ' table-mobile-card--interactive' : ''}`}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
+              title={onRowClick ? rowTitle : undefined}
             >
               <div className="table-mobile-card__primary">
                 <span className="table-mobile-card__eyebrow">{getFieldLabel(primaryColumn, columnLabels)}</span>

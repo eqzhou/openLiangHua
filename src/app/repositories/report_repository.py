@@ -5,10 +5,19 @@ import time
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import pandas as pd
 
 from src.app.repositories.postgres_market_repository import load_daily_bar_from_market_database
+from src.app.repositories.research_panel_repository import (
+    load_feature_frame_from_research_panel,
+    load_label_frame_from_research_panel,
+    load_latest_successful_panel_run,
+    load_research_panel,
+    load_research_panel_summary,
+)
+from src.db.connection import connect_database
 from src.db.dashboard_artifact_keys import (
     binary_artifact_key,
     candidate_snapshot_artifact_key,
@@ -25,6 +34,24 @@ from src.db.dashboard_artifact_keys import (
 from src.db.dashboard_artifact_store import DashboardArtifact, get_dashboard_artifact_store
 from src.utils.data_source import source_or_canonical_path, source_prefixed_path
 from src.utils.io import ensure_dir, project_root, save_text
+
+
+def _uses_primary_project_root(root: Path | None) -> bool:
+    if root is None:
+        return True
+    try:
+        return root.resolve() == project_root().resolve()
+    except OSError:
+        return False
+
+
+def _is_within_primary_project_root(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+        primary = project_root().resolve()
+        return resolved == primary or primary in resolved.parents
+    except OSError:
+        return False
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -86,6 +113,17 @@ def _artifact_or_none(artifact_key: str) -> DashboardArtifact | None:
         return None
 
 
+def get_artifact_metadata(artifact_key: str) -> dict[str, Any]:
+    artifact = _artifact_or_none(artifact_key)
+    if artifact is None:
+        return {}
+    payload = dict(artifact.metadata_json or {})
+    payload["updated_at"] = artifact.updated_at.isoformat() if artifact.updated_at is not None else None
+    payload["artifact_kind"] = artifact.artifact_kind
+    payload["data_source"] = artifact.data_source
+    return payload
+
+
 def _json_artifact_payload(artifact_key: str) -> dict[str, Any] | list[dict[str, Any]] | None:
     artifact = _artifact_or_none(artifact_key)
     if not artifact or artifact.payload_json is None:
@@ -105,6 +143,21 @@ def _binary_artifact_payload(artifact_key: str) -> tuple[bytes, dict[str, Any]] 
     if not artifact or artifact.payload_bytes is None:
         return None
     return artifact.payload_bytes, artifact.metadata_json
+
+
+def _artifact_ref(artifact_key: str) -> str:
+    return f"artifact://{artifact_key}"
+
+
+def _parquet_bytes(frame: pd.DataFrame) -> bytes:
+    working = frame.copy()
+    object_columns = working.select_dtypes(include=["object"]).columns.tolist()
+    for column in object_columns:
+        if working[column].map(lambda value: isinstance(value, UUID)).any():
+            working[column] = working[column].map(lambda value: str(value) if isinstance(value, UUID) else value)
+    buffer = BytesIO()
+    working.to_parquet(buffer, index=False)
+    return buffer.getvalue()
 
 
 def _frame_from_records(records: Any) -> pd.DataFrame:
@@ -300,27 +353,46 @@ def save_binary_dataset(
     artifact_name: str,
     frame: pd.DataFrame,
     write_canonical: bool = True,
-) -> Path:
-    resolved_root = root or project_root()
-    output_dir = ensure_dir(resolved_root / directory)
-    source_path = source_prefixed_path(output_dir, filename, data_source)
-    frame.to_parquet(source_path, index=False)
-    if write_canonical:
-        frame.to_parquet(output_dir / filename, index=False)
+) -> str:
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        output_dir = ensure_dir(resolved_root / directory)
+        source_path = source_prefixed_path(output_dir, filename, data_source)
+        frame.to_parquet(source_path, index=False)
+        if write_canonical:
+            frame.to_parquet(output_dir / filename, index=False)
+        get_dashboard_artifact_store().upsert_bytes(
+            artifact_key=binary_artifact_key(data_source, artifact_name),
+            data_source=data_source,
+            artifact_kind="parquet",
+            content=source_path.read_bytes(),
+            metadata={
+                "artifact_name": artifact_name,
+                "source_path": str(source_path),
+                "rows": int(len(frame)),
+                "columns": list(frame.columns),
+            },
+        )
+        return source_path
 
+    artifact_key = binary_artifact_key(data_source, artifact_name)
+    content = _parquet_bytes(frame)
     get_dashboard_artifact_store().upsert_bytes(
-        artifact_key=binary_artifact_key(data_source, artifact_name),
+        artifact_key=artifact_key,
         data_source=data_source,
         artifact_kind="parquet",
-        content=source_path.read_bytes(),
+        content=content,
         metadata={
             "artifact_name": artifact_name,
-            "source_path": str(source_path),
             "rows": int(len(frame)),
             "columns": list(frame.columns),
+            "directory": directory,
+            "filename": filename,
+            "write_canonical": bool(write_canonical),
+            "size_bytes": len(content),
         },
     )
-    return source_path
+    return _artifact_ref(artifact_key)
 
 
 def save_json_report(
@@ -330,26 +402,74 @@ def save_json_report(
     filename: str,
     payload: dict[str, Any],
     artifact_name: str | None = None,
-) -> Path:
-    resolved_root = root or project_root()
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
-    source_path = _write_json_variants(reports_dir, filename, data_source, payload)
+) -> str:
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+        source_path = _write_json_variants(reports_dir, filename, data_source, payload)
+        if artifact_name:
+            artifact_key = json_artifact_key(data_source, artifact_name)
+            get_dashboard_artifact_store().upsert_json(
+                artifact_key=artifact_key,
+                data_source=data_source,
+                artifact_kind="json",
+                payload=payload,
+                metadata={"source_path": str(source_path)},
+            )
+        return source_path
+
     if artifact_name:
+        artifact_key = json_artifact_key(data_source, artifact_name)
         get_dashboard_artifact_store().upsert_json(
-            artifact_key=json_artifact_key(data_source, artifact_name),
+            artifact_key=artifact_key,
             data_source=data_source,
             artifact_kind="json",
             payload=payload,
-            metadata={"source_path": str(source_path)},
+            metadata={"filename": filename},
         )
-    return source_path
+        return _artifact_ref(artifact_key)
+    return ""
 
 
 def load_dataset_summary(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> dict[str, object]:
-    if prefer_database:
-        artifact_payload = _json_artifact_payload(json_artifact_key(data_source, "dataset_summary"))
-        if isinstance(artifact_payload, dict):
-            return artifact_payload
+    if prefer_database and _uses_primary_project_root(root):
+        daily_bar_metadata = get_artifact_metadata(binary_artifact_key(data_source, "daily_bar"))
+        panel_run = load_latest_successful_panel_run(data_source=data_source)
+        panel_summary = load_research_panel_summary(data_source=data_source)
+
+        summary: dict[str, object] = {
+            "cached_symbols": 0,
+            "daily_bar": {
+                "exists": bool(daily_bar_metadata),
+                "size_mb": round((int(daily_bar_metadata.get("size_bytes", 0) or 0) / (1024 * 1024)), 2) if daily_bar_metadata else None,
+                "updated": daily_bar_metadata.get("updated_at"),
+            },
+            "features": {
+                "exists": bool(panel_run),
+                "size_mb": None,
+                "updated": panel_run.get("updated_at"),
+            },
+            "labels": {
+                "exists": bool(panel_run),
+                "size_mb": None,
+                "updated": panel_run.get("updated_at"),
+            },
+        }
+        if panel_summary:
+            summary["feature_rows"] = int(panel_summary.get("row_count", 0) or 0)
+            summary["label_rows"] = int(panel_summary.get("row_count", 0) or 0)
+            summary["feature_symbols"] = int(panel_summary.get("symbol_count", 0) or 0)
+            summary["label_symbols"] = int(panel_summary.get("symbol_count", 0) or 0)
+            summary["date_min"] = panel_summary.get("date_min")
+            summary["date_max"] = panel_summary.get("date_max")
+        elif panel_run:
+            summary["feature_rows"] = int(panel_run.get("row_count", 0) or 0)
+            summary["label_rows"] = int(panel_run.get("row_count", 0) or 0)
+            summary["feature_symbols"] = int(panel_run.get("symbol_count", 0) or 0)
+            summary["label_symbols"] = int(panel_run.get("symbol_count", 0) or 0)
+            summary["date_min"] = panel_run.get("date_min")
+            summary["date_max"] = panel_run.get("date_max")
+        return summary
 
     resolved_root = root or project_root()
     data_dir = resolved_root / "data"
@@ -377,21 +497,66 @@ def load_dataset_summary(root: Path | None = None, *, data_source: str, prefer_d
 
 
 def load_feature_panel(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
+        panel_frame = load_feature_frame_from_research_panel(data_source=data_source)
+        if not panel_frame.empty:
+            return panel_frame
         artifact_payload = _binary_artifact_payload(binary_artifact_key(data_source, "feature_panel"))
         if artifact_payload is not None:
             return _read_parquet_bytes(artifact_payload[0])
+        return pd.DataFrame()
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(resolved_root / "data" / "features", "feature_panel.parquet", data_source)
     return _read_parquet_frame(path)
 
 
+def load_feature_history_for_symbol(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    symbol: str,
+    factor_name: str,
+    prefer_database: bool = True,
+) -> pd.DataFrame:
+    normalized_symbol = str(symbol or "").strip()
+    normalized_factor = str(factor_name or "").strip()
+    if not normalized_symbol or not normalized_factor:
+        return pd.DataFrame()
+
+    columns = ["trade_date", "ts_code", normalized_factor]
+    if prefer_database and _uses_primary_project_root(root):
+        panel_frame = load_research_panel(
+            data_source=data_source,
+            symbols=[normalized_symbol],
+            columns=columns,
+        )
+        if panel_frame.empty:
+            return panel_frame
+        available_columns = [column for column in columns if column in panel_frame.columns]
+        return panel_frame[available_columns].copy()
+
+    resolved_root = root or project_root()
+    path = source_or_canonical_path(resolved_root / "data" / "features", "feature_panel.parquet", data_source)
+    if not path.exists():
+        return pd.DataFrame()
+    frame = pd.read_parquet(path, columns=columns)
+    if "trade_date" in frame.columns:
+        frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
+    if "ts_code" in frame.columns:
+        frame = frame.loc[frame["ts_code"].astype(str) == normalized_symbol].copy()
+    return frame
+
+
 def load_label_panel(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
+        panel_frame = load_label_frame_from_research_panel(data_source=data_source)
+        if not panel_frame.empty:
+            return panel_frame
         artifact_payload = _binary_artifact_payload(binary_artifact_key(data_source, "label_panel"))
         if artifact_payload is not None:
             return _read_parquet_bytes(artifact_payload[0])
+        return pd.DataFrame()
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(resolved_root / "data" / "labels", "label_panel.parquet", data_source)
@@ -399,10 +564,11 @@ def load_label_panel(root: Path | None = None, *, data_source: str, prefer_datab
 
 
 def load_trade_calendar(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _binary_artifact_payload(binary_artifact_key(data_source, "trade_calendar"))
         if artifact_payload is not None:
             return _read_parquet_bytes(artifact_payload[0])
+        return pd.DataFrame()
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(resolved_root / "data" / "staging", "trade_calendar.parquet", data_source)
@@ -410,10 +576,11 @@ def load_trade_calendar(root: Path | None = None, *, data_source: str, prefer_da
 
 
 def load_daily_bar(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _binary_artifact_payload(binary_artifact_key(data_source, "daily_bar"))
         if artifact_payload is not None:
             return _enrich_missing_industries(root or project_root(), _read_parquet_bytes(artifact_payload[0]))
+        return pd.DataFrame()
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(resolved_root / "data" / "staging", "daily_bar.parquet", data_source)
@@ -445,10 +612,11 @@ def load_metrics(
     split_name: str,
     prefer_database: bool = True,
 ) -> dict[str, Any]:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(json_artifact_key(data_source, f"metrics:{model_name}:{split_name}"))
         if isinstance(artifact_payload, dict):
             return artifact_payload
+        return {}
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(
@@ -466,10 +634,11 @@ def load_stability(
     model_name: str,
     prefer_database: bool = True,
 ) -> dict[str, Any]:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(json_artifact_key(data_source, f"stability:{model_name}"))
         if isinstance(artifact_payload, dict):
             return artifact_payload
+        return {}
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(
@@ -488,10 +657,11 @@ def load_portfolio(
     split_name: str,
     prefer_database: bool = True,
 ) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(table_artifact_key(data_source, f"portfolio:{model_name}:{split_name}"))
         if artifact_payload is not None:
             return _frame_from_records(artifact_payload)
+        return pd.DataFrame()
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(
@@ -510,10 +680,14 @@ def load_predictions(
     split_name: str,
     prefer_database: bool = True,
 ) -> pd.DataFrame:
-    if prefer_database:
-        artifact_payload = _json_artifact_payload(table_artifact_key(data_source, f"predictions:{model_name}:{split_name}"))
-        if artifact_payload is not None:
-            return _frame_from_records(artifact_payload)
+    if prefer_database and _uses_primary_project_root(root):
+        artifact = _artifact_or_none(table_artifact_key(data_source, f"predictions:{model_name}:{split_name}"))
+        if artifact is not None:
+            if artifact.payload_json is not None:
+                return _frame_from_records(artifact.payload_json)
+            if artifact.payload_bytes is not None:
+                return _read_parquet_bytes(artifact.payload_bytes)
+        return pd.DataFrame()
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(
@@ -524,6 +698,55 @@ def load_predictions(
     return _read_csv_frame(path)
 
 
+def load_prediction_history_for_symbol(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    model_name: str,
+    split_name: str,
+    symbol: str,
+    prefer_database: bool = True,
+) -> pd.DataFrame:
+    normalized_symbol = str(symbol or "").strip()
+    if not normalized_symbol:
+        return pd.DataFrame()
+
+    if prefer_database and _uses_primary_project_root(root):
+        artifact = _artifact_or_none(table_artifact_key(data_source, f"predictions:{model_name}:{split_name}"))
+        if artifact is not None:
+            if artifact.payload_json is not None:
+                records = get_dashboard_artifact_store().get_projected_json_records(
+                    artifact_key=table_artifact_key(data_source, f"predictions:{model_name}:{split_name}"),
+                    field_names=["trade_date", "ts_code", "score", "ret_t1_t10"],
+                    filter_field_name="ts_code",
+                    filter_field_value=normalized_symbol,
+                    order_by_field="trade_date",
+                    descending=True,
+                    limit=240,
+                )
+                return _frame_from_records(records)
+            if artifact.payload_bytes is not None:
+                frame = _read_parquet_bytes(artifact.payload_bytes)
+                if frame.empty:
+                    return frame
+                filtered = frame.loc[frame["ts_code"].astype(str) == normalized_symbol, ["trade_date", "ts_code", "score", "ret_t1_t10"]].copy()
+                return filtered.sort_values("trade_date").tail(240).reset_index(drop=True)
+        return pd.DataFrame()
+
+    resolved_root = root or project_root()
+    path = source_or_canonical_path(
+        resolved_root / "reports" / "weekly",
+        f"{model_name}_{split_name}_predictions.csv",
+        data_source,
+    )
+    if not path.exists():
+        return pd.DataFrame()
+    frame = pd.read_csv(path, usecols=lambda value: value in {"trade_date", "ts_code", "score", "ret_t1_t10"})
+    if "trade_date" in frame.columns:
+        frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce")
+    return frame.loc[frame["ts_code"].astype(str) == normalized_symbol].copy()
+
+
 def load_feature_importance(
     root: Path | None = None,
     *,
@@ -531,10 +754,11 @@ def load_feature_importance(
     model_name: str,
     prefer_database: bool = True,
 ) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(table_artifact_key(data_source, f"feature_importance:{model_name}"))
         if artifact_payload is not None:
             return _frame_from_records(artifact_payload)
+        return pd.DataFrame()
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(
@@ -554,10 +778,11 @@ def load_diagnostic_table(
     table_name: str,
     prefer_database: bool = True,
 ) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(table_artifact_key(data_source, f"diagnostic:{model_name}:{split_name}:{table_name}"))
         if artifact_payload is not None:
             return _frame_from_records(artifact_payload)
+        return pd.DataFrame()
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(
@@ -569,10 +794,11 @@ def load_diagnostic_table(
 
 
 def load_overlay_candidates(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(table_artifact_key(data_source, "overlay_candidates"))
         if artifact_payload is not None:
             return _frame_from_records(artifact_payload)
+        return pd.DataFrame()
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(resolved_root / "reports" / "weekly", "overlay_latest_candidates.csv", data_source)
@@ -580,10 +806,11 @@ def load_overlay_candidates(root: Path | None = None, *, data_source: str, prefe
 
 
 def load_overlay_packet(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> dict[str, Any]:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(json_artifact_key(data_source, "overlay_packet"))
         if isinstance(artifact_payload, dict):
             return artifact_payload
+        return {}
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(resolved_root / "reports" / "weekly", "overlay_latest_packet.json", data_source)
@@ -591,10 +818,11 @@ def load_overlay_packet(root: Path | None = None, *, data_source: str, prefer_da
 
 
 def load_overlay_brief(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> str:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _text_artifact_payload(text_artifact_key(data_source, "overlay_brief"))
         if artifact_payload is not None:
             return artifact_payload[0]
+        return ""
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(resolved_root / "reports" / "weekly", "overlay_latest_brief.md", data_source)
@@ -602,10 +830,11 @@ def load_overlay_brief(root: Path | None = None, *, data_source: str, prefer_dat
 
 
 def load_overlay_inference_candidates(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> pd.DataFrame:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(table_artifact_key(data_source, "overlay_inference_candidates"))
         if artifact_payload is not None:
             return _frame_from_records(artifact_payload)
+        return pd.DataFrame()
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(
@@ -617,10 +846,11 @@ def load_overlay_inference_candidates(root: Path | None = None, *, data_source: 
 
 
 def load_overlay_inference_packet(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> dict[str, Any]:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(json_artifact_key(data_source, "overlay_inference_packet"))
         if isinstance(artifact_payload, dict):
             return artifact_payload
+        return {}
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(
@@ -632,10 +862,11 @@ def load_overlay_inference_packet(root: Path | None = None, *, data_source: str,
 
 
 def load_overlay_inference_brief(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> str:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _text_artifact_payload(text_artifact_key(data_source, "overlay_inference_brief"))
         if artifact_payload is not None:
             return artifact_payload[0]
+        return ""
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(
@@ -647,10 +878,11 @@ def load_overlay_inference_brief(root: Path | None = None, *, data_source: str, 
 
 
 def load_overlay_inference_shortlist(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> str:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _text_artifact_payload(text_artifact_key(data_source, "overlay_inference_shortlist"))
         if artifact_payload is not None:
             return artifact_payload[0]
+        return ""
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(
@@ -662,10 +894,11 @@ def load_overlay_inference_shortlist(root: Path | None = None, *, data_source: s
 
 
 def load_inference_packet(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> dict[str, Any]:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(json_artifact_key(data_source, "inference_packet"))
         if isinstance(artifact_payload, dict):
             return artifact_payload
+        return {}
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(resolved_root / "reports" / "weekly", "inference_packet.json", data_source)
@@ -673,10 +906,11 @@ def load_inference_packet(root: Path | None = None, *, data_source: str, prefer_
 
 
 def load_ensemble_weights(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> dict[str, Any]:
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _json_artifact_payload(json_artifact_key(data_source, "ensemble_weights"))
         if isinstance(artifact_payload, dict):
             return artifact_payload
+        return {}
 
     resolved_root = root or project_root()
     path = source_or_canonical_path(resolved_root / "reports" / "weekly", "ensemble_weights.json", data_source)
@@ -710,14 +944,20 @@ def load_overlay_llm_bundle(
 
     llm_bridge = dict((packet or {}).get("llm_bridge", {}) or {})
     if not records_loaded_from_store:
-        response_path_text = str(llm_bridge.get("response_jsonl_path", "") or "").strip()
-        if response_path_text:
-            response_records = read_jsonl_records(Path(response_path_text))
+        if prefer_database and _uses_primary_project_root(root):
+            response_records = []
+        else:
+            response_path_text = str(llm_bridge.get("response_jsonl_path", "") or "").strip()
+            if response_path_text:
+                response_records = read_jsonl_records(Path(response_path_text))
 
     if not summary_loaded_from_store:
-        summary_path_text = str(llm_bridge.get("response_summary_path", "") or "").strip()
-        if summary_path_text:
-            response_summary = read_text(Path(summary_path_text))
+        if prefer_database and _uses_primary_project_root(root):
+            response_summary = ""
+        else:
+            summary_path_text = str(llm_bridge.get("response_summary_path", "") or "").strip()
+            if summary_path_text:
+                response_summary = read_text(Path(summary_path_text))
 
     response_lookup = {
         str(record.get("custom_id", "")).strip(): record
@@ -741,6 +981,147 @@ def load_watchlist_snapshot(
         if artifact_payload is not None:
             return _frame_from_records(artifact_payload)
     return None
+
+
+def _projected_table_artifact_records(
+    *,
+    artifact_key: str,
+    field_names: list[str],
+    filter_symbol: str | None = None,
+) -> list[dict[str, Any]]:
+    return get_dashboard_artifact_store().get_projected_json_records(
+        artifact_key=artifact_key,
+        field_names=field_names,
+        filter_field_name="ts_code" if filter_symbol else None,
+        filter_field_value=filter_symbol,
+    )
+
+
+def load_watchlist_summary_records(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    field_names: list[str],
+    keyword: str = "",
+    scope: str = "all",
+    sort_by: str = "inference_rank",
+    page: int = 1,
+    page_size: int = 30,
+    prefer_database: bool = True,
+) -> list[dict[str, Any]]:
+    if prefer_database and _uses_primary_project_root(root):
+        return _load_watchlist_summary_records_from_database(
+            artifact_key=watchlist_artifact_key(data_source),
+            field_names=field_names,
+            keyword=keyword,
+            scope=scope,
+            sort_by=sort_by,
+            page=page,
+            page_size=page_size,
+        )
+
+    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database)
+    if snapshot is None or snapshot.empty:
+        return []
+    filtered = _filter_watchlist_snapshot_frame(snapshot, keyword=keyword, scope=scope, sort_by=sort_by)
+    normalized_page_size = max(1, int(page_size))
+    normalized_page = max(1, int(page))
+    page_start = (normalized_page - 1) * normalized_page_size
+    page_end = page_start + normalized_page_size
+    filtered = filtered.iloc[page_start:page_end].copy()
+    available_columns = [column for column in field_names if column in filtered.columns]
+    if not available_columns:
+        return []
+    return _frame_records_for_artifact(filtered[available_columns].copy())
+
+
+def load_watchlist_record(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    symbol: str,
+    field_names: list[str] | None = None,
+    prefer_database: bool = True,
+) -> dict[str, Any]:
+    normalized_symbol = str(symbol or "").strip()
+    if not normalized_symbol:
+        return {}
+
+    if prefer_database and _uses_primary_project_root(root):
+        if field_names:
+            rows = _projected_table_artifact_records(
+                artifact_key=watchlist_artifact_key(data_source),
+                field_names=field_names,
+                filter_symbol=normalized_symbol,
+            )
+            return rows[0] if rows else {}
+
+        rows = get_dashboard_artifact_store().get_json_records_by_field(
+            artifact_key=watchlist_artifact_key(data_source),
+            field_name="ts_code",
+            field_value=normalized_symbol,
+        )
+        return rows[0] if rows else {}
+
+    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database)
+    if snapshot is None or snapshot.empty:
+        return {}
+    matched = snapshot.loc[snapshot["ts_code"].astype(str) == normalized_symbol].head(1)
+    if matched.empty:
+        return {}
+    if field_names:
+        available_columns = [column for column in field_names if column in matched.columns]
+        return dict(matched[available_columns].iloc[0].to_dict()) if available_columns else {}
+    return dict(matched.iloc[0].to_dict())
+
+
+def load_watchlist_overview(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    prefer_database: bool = True,
+) -> dict[str, Any]:
+    if prefer_database and _uses_primary_project_root(root):
+        return _load_watchlist_overview_from_database(artifact_key=watchlist_artifact_key(data_source))
+
+    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database)
+    if snapshot is None or snapshot.empty:
+        return {
+            "totalCount": 0,
+            "overlayCount": 0,
+            "inferenceOverlayCount": 0,
+            "marketValue": 0.0,
+            "unrealizedPnl": 0.0,
+        }
+    return {
+        "totalCount": int(len(snapshot)),
+        "overlayCount": int(snapshot["is_overlay_selected"].fillna(False).sum()) if "is_overlay_selected" in snapshot.columns else 0,
+        "inferenceOverlayCount": int(snapshot["is_inference_overlay_selected"].fillna(False).sum()) if "is_inference_overlay_selected" in snapshot.columns else 0,
+        "marketValue": float(pd.to_numeric(snapshot.get("market_value"), errors="coerce").fillna(0).sum()) if "market_value" in snapshot.columns else 0.0,
+        "unrealizedPnl": float(pd.to_numeric(snapshot.get("unrealized_pnl"), errors="coerce").fillna(0).sum()) if "unrealized_pnl" in snapshot.columns else 0.0,
+    }
+
+
+def load_watchlist_filtered_count(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    keyword: str = "",
+    scope: str = "all",
+    prefer_database: bool = True,
+) -> int:
+    if prefer_database and _uses_primary_project_root(root):
+        return _load_watchlist_filtered_count_from_database(
+            artifact_key=watchlist_artifact_key(data_source),
+            keyword=keyword,
+            scope=scope,
+        )
+
+    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database)
+    if snapshot is None or snapshot.empty:
+        return 0
+    filtered = _filter_watchlist_snapshot_frame(snapshot, keyword=keyword, scope=scope, sort_by="inference_rank")
+    return int(len(filtered))
 
 
 def load_candidate_snapshot(
@@ -771,6 +1152,76 @@ def load_factor_explorer_snapshot(
     return None
 
 
+def _overlay_candidate_artifact_key(data_source: str, scope: str) -> str:
+    normalized_scope = "inference" if scope == "inference" else "historical"
+    artifact_name = "overlay_inference_candidates" if normalized_scope == "inference" else "overlay_candidates"
+    return table_artifact_key(data_source, artifact_name)
+
+
+def load_overlay_candidate_summary_records(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    scope: str,
+    field_names: list[str],
+    prefer_database: bool = True,
+) -> list[dict[str, Any]]:
+    if prefer_database and _uses_primary_project_root(root):
+        return _projected_table_artifact_records(
+            artifact_key=_overlay_candidate_artifact_key(data_source, scope),
+            field_names=field_names,
+        )
+
+    candidates = load_overlay_inference_candidates(root, data_source=data_source, prefer_database=prefer_database) if scope == "inference" else load_overlay_candidates(root, data_source=data_source, prefer_database=prefer_database)
+    if candidates.empty:
+        return []
+    available_columns = [column for column in field_names if column in candidates.columns]
+    if not available_columns:
+        return []
+    return _frame_records_for_artifact(candidates[available_columns].copy())
+
+
+def load_overlay_candidate_record(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    scope: str,
+    symbol: str,
+    field_names: list[str] | None = None,
+    prefer_database: bool = True,
+) -> dict[str, Any]:
+    normalized_symbol = str(symbol or "").strip()
+    if not normalized_symbol:
+        return {}
+
+    if prefer_database and _uses_primary_project_root(root):
+        if field_names:
+            rows = _projected_table_artifact_records(
+                artifact_key=_overlay_candidate_artifact_key(data_source, scope),
+                field_names=field_names,
+                filter_symbol=normalized_symbol,
+            )
+            return rows[0] if rows else {}
+
+        rows = get_dashboard_artifact_store().get_json_records_by_field(
+            artifact_key=_overlay_candidate_artifact_key(data_source, scope),
+            field_name="ts_code",
+            field_value=normalized_symbol,
+        )
+        return rows[0] if rows else {}
+
+    candidates = load_overlay_inference_candidates(root, data_source=data_source, prefer_database=prefer_database) if scope == "inference" else load_overlay_candidates(root, data_source=data_source, prefer_database=prefer_database)
+    if candidates.empty:
+        return {}
+    matched = candidates.loc[candidates["ts_code"].astype(str) == normalized_symbol].head(1)
+    if matched.empty:
+        return {}
+    if field_names:
+        available_columns = [column for column in field_names if column in matched.columns]
+        return dict(matched[available_columns].iloc[0].to_dict()) if available_columns else {}
+    return dict(matched.iloc[0].to_dict())
+
+
 def load_latest_symbol_markdown(
     symbol: str,
     note_kind: str,
@@ -783,7 +1234,7 @@ def load_latest_symbol_markdown(
     if not normalized_symbol:
         return {}
 
-    if prefer_database:
+    if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _text_artifact_payload(note_artifact_key(data_source, normalized_symbol, note_kind))
         if artifact_payload is not None:
             content, metadata = artifact_payload
@@ -793,6 +1244,7 @@ def load_latest_symbol_markdown(
                 "plan_date": str(metadata.get("plan_date", "")),
                 "content": content,
             }
+        return {}
 
     resolved_root = root or project_root()
     reports_dir = resolved_root / "reports" / "weekly"
@@ -832,18 +1284,29 @@ def save_feature_quality_report(
     data_source: str,
     filename: str,
     frame: pd.DataFrame,
-) -> Path:
-    resolved_root = root or project_root()
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
-    source_path = _write_csv_variants(reports_dir, filename, data_source, frame)
+) -> str:
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+        source_path = _write_csv_variants(reports_dir, filename, data_source, frame)
+        get_dashboard_artifact_store().upsert_json(
+            artifact_key=table_artifact_key(data_source, filename.removesuffix(".csv")),
+            data_source=data_source,
+            artifact_kind="table",
+            payload=_frame_records_for_artifact(frame),
+            metadata={"rows": int(len(frame)), "source_path": str(source_path)},
+        )
+        return source_path
+
+    artifact_key = table_artifact_key(data_source, filename.removesuffix(".csv"))
     get_dashboard_artifact_store().upsert_json(
-        artifact_key=table_artifact_key(data_source, filename.removesuffix(".csv")),
+        artifact_key=artifact_key,
         data_source=data_source,
         artifact_kind="table",
         payload=_frame_records_for_artifact(frame),
-        metadata={"rows": int(len(frame)), "source_path": str(source_path)},
+        metadata={"rows": int(len(frame)), "filename": filename},
     )
-    return source_path
+    return _artifact_ref(artifact_key)
 
 
 def save_text_report(
@@ -853,20 +1316,31 @@ def save_text_report(
     filename: str,
     content: str,
     artifact_name: str,
-) -> Path:
-    resolved_root = root or project_root()
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
-    source_path = source_prefixed_path(reports_dir, filename, data_source)
-    save_text(content, source_path)
-    save_text(content, reports_dir / filename)
+) -> str:
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+        source_path = source_prefixed_path(reports_dir, filename, data_source)
+        save_text(content, source_path)
+        save_text(content, reports_dir / filename)
+        get_dashboard_artifact_store().upsert_text(
+            artifact_key=text_artifact_key(data_source, artifact_name),
+            data_source=data_source,
+            artifact_kind="markdown",
+            content=content,
+            metadata={"source_path": str(source_path)},
+        )
+        return source_path
+
+    artifact_key = text_artifact_key(data_source, artifact_name)
     get_dashboard_artifact_store().upsert_text(
-        artifact_key=text_artifact_key(data_source, artifact_name),
+        artifact_key=artifact_key,
         data_source=data_source,
         artifact_kind="markdown",
         content=content,
-        metadata={"source_path": str(source_path)},
+        metadata={"filename": filename},
     )
-    return source_path
+    return _artifact_ref(artifact_key)
 
 
 def save_model_split_reports(
@@ -880,24 +1354,82 @@ def save_model_split_reports(
     metrics: dict[str, Any],
     diagnostics: dict[str, pd.DataFrame] | None = None,
 ) -> dict[str, str]:
-    resolved_root = root or project_root()
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
 
-    prediction_filename = f"{model_name}_{split_name}_predictions.csv"
-    portfolio_filename = f"{model_name}_{split_name}_portfolio.csv"
-    metrics_filename = f"{model_name}_{split_name}_metrics.json"
+        prediction_filename = f"{model_name}_{split_name}_predictions.csv"
+        portfolio_filename = f"{model_name}_{split_name}_portfolio.csv"
+        metrics_filename = f"{model_name}_{split_name}_metrics.json"
 
-    prediction_path = _write_csv_variants(reports_dir, prediction_filename, data_source, predictions)
-    portfolio_path = _write_csv_variants(reports_dir, portfolio_filename, data_source, portfolio)
-    metrics_path = _write_json_variants(reports_dir, metrics_filename, data_source, metrics)
+        prediction_path = _write_csv_variants(reports_dir, prediction_filename, data_source, predictions)
+        portfolio_path = _write_csv_variants(reports_dir, portfolio_filename, data_source, portfolio)
+        metrics_path = _write_json_variants(reports_dir, metrics_filename, data_source, metrics)
+
+        store = get_dashboard_artifact_store()
+        store.upsert_json(
+            artifact_key=table_artifact_key(data_source, f"predictions:{model_name}:{split_name}"),
+            data_source=data_source,
+            artifact_kind="table",
+            payload=_frame_records_for_artifact(predictions),
+            metadata={"rows": int(len(predictions)), "source_path": str(prediction_path)},
+        )
+        if not predictions.empty:
+            from src.utils.prediction_snapshot import build_latest_prediction_snapshot
+
+            candidate_snapshot = build_latest_prediction_snapshot(predictions)
+            store.upsert_json(
+                artifact_key=candidate_snapshot_artifact_key(data_source, model_name, split_name),
+                data_source=data_source,
+                artifact_kind="table",
+                payload=_frame_records_for_artifact(candidate_snapshot),
+                metadata={"rows": int(len(candidate_snapshot)), "source_path": str(prediction_path)},
+            )
+        store.upsert_json(
+            artifact_key=table_artifact_key(data_source, f"portfolio:{model_name}:{split_name}"),
+            data_source=data_source,
+            artifact_kind="table",
+            payload=_frame_records_for_artifact(portfolio),
+            metadata={"rows": int(len(portfolio)), "source_path": str(portfolio_path)},
+        )
+        store.upsert_json(
+            artifact_key=json_artifact_key(data_source, f"metrics:{model_name}:{split_name}"),
+            data_source=data_source,
+            artifact_kind="json",
+            payload=metrics,
+            metadata={"source_path": str(metrics_path)},
+        )
+
+        output = {
+            "prediction_path": str(prediction_path),
+            "portfolio_path": str(portfolio_path),
+            "metrics_path": str(metrics_path),
+        }
+        for table_name, table in (diagnostics or {}).items():
+            if table.empty:
+                continue
+            diagnostic_filename = f"{model_name}_{split_name}_{table_name}.csv"
+            diagnostic_path = _write_csv_variants(reports_dir, diagnostic_filename, data_source, table)
+            store.upsert_json(
+                artifact_key=table_artifact_key(data_source, f"diagnostic:{model_name}:{split_name}:{table_name}"),
+                data_source=data_source,
+                artifact_kind="table",
+                payload=_frame_records_for_artifact(table),
+                metadata={"rows": int(len(table)), "source_path": str(diagnostic_path)},
+            )
+            output[f"diagnostic_{table_name}_path"] = str(diagnostic_path)
+        return output
 
     store = get_dashboard_artifact_store()
-    store.upsert_json(
-        artifact_key=table_artifact_key(data_source, f"predictions:{model_name}:{split_name}"),
+    prediction_key = table_artifact_key(data_source, f"predictions:{model_name}:{split_name}")
+    portfolio_key = table_artifact_key(data_source, f"portfolio:{model_name}:{split_name}")
+    metrics_key = json_artifact_key(data_source, f"metrics:{model_name}:{split_name}")
+    store.upsert_bytes(
+        artifact_key=prediction_key,
         data_source=data_source,
-        artifact_kind="table",
-        payload=_frame_records_for_artifact(predictions),
-        metadata={"rows": int(len(predictions)), "source_path": str(prediction_path)},
+        artifact_kind="parquet",
+        content=_parquet_bytes(predictions),
+        metadata={"rows": int(len(predictions)), "model_name": model_name, "split_name": split_name},
     )
     if not predictions.empty:
         from src.utils.prediction_snapshot import build_latest_prediction_snapshot
@@ -908,41 +1440,40 @@ def save_model_split_reports(
             data_source=data_source,
             artifact_kind="table",
             payload=_frame_records_for_artifact(candidate_snapshot),
-            metadata={"rows": int(len(candidate_snapshot)), "source_path": str(prediction_path)},
+            metadata={"rows": int(len(candidate_snapshot)), "model_name": model_name, "split_name": split_name},
         )
     store.upsert_json(
-        artifact_key=table_artifact_key(data_source, f"portfolio:{model_name}:{split_name}"),
+        artifact_key=portfolio_key,
         data_source=data_source,
         artifact_kind="table",
         payload=_frame_records_for_artifact(portfolio),
-        metadata={"rows": int(len(portfolio)), "source_path": str(portfolio_path)},
+        metadata={"rows": int(len(portfolio)), "model_name": model_name, "split_name": split_name},
     )
     store.upsert_json(
-        artifact_key=json_artifact_key(data_source, f"metrics:{model_name}:{split_name}"),
+        artifact_key=metrics_key,
         data_source=data_source,
         artifact_kind="json",
         payload=metrics,
-        metadata={"source_path": str(metrics_path)},
+        metadata={"model_name": model_name, "split_name": split_name},
     )
 
     output = {
-        "prediction_path": str(prediction_path),
-        "portfolio_path": str(portfolio_path),
-        "metrics_path": str(metrics_path),
+        "prediction_path": _artifact_ref(prediction_key),
+        "portfolio_path": _artifact_ref(portfolio_key),
+        "metrics_path": _artifact_ref(metrics_key),
     }
     for table_name, table in (diagnostics or {}).items():
         if table.empty:
             continue
-        diagnostic_filename = f"{model_name}_{split_name}_{table_name}.csv"
-        diagnostic_path = _write_csv_variants(reports_dir, diagnostic_filename, data_source, table)
+        diagnostic_key = table_artifact_key(data_source, f"diagnostic:{model_name}:{split_name}:{table_name}")
         store.upsert_json(
-            artifact_key=table_artifact_key(data_source, f"diagnostic:{model_name}:{split_name}:{table_name}"),
+            artifact_key=diagnostic_key,
             data_source=data_source,
             artifact_kind="table",
             payload=_frame_records_for_artifact(table),
-            metadata={"rows": int(len(table)), "source_path": str(diagnostic_path)},
+            metadata={"rows": int(len(table)), "model_name": model_name, "split_name": split_name, "table_name": table_name},
         )
-        output[f"diagnostic_{table_name}_path"] = str(diagnostic_path)
+        output[f"diagnostic_{table_name}_path"] = _artifact_ref(diagnostic_key)
     return output
 
 
@@ -952,19 +1483,30 @@ def save_feature_importance_report(
     data_source: str,
     model_name: str,
     frame: pd.DataFrame,
-) -> Path:
-    resolved_root = root or project_root()
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
-    filename = f"{model_name}_feature_importance.csv"
-    source_path = _write_csv_variants(reports_dir, filename, data_source, frame)
+) -> str:
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+        filename = f"{model_name}_feature_importance.csv"
+        source_path = _write_csv_variants(reports_dir, filename, data_source, frame)
+        get_dashboard_artifact_store().upsert_json(
+            artifact_key=table_artifact_key(data_source, f"feature_importance:{model_name}"),
+            data_source=data_source,
+            artifact_kind="table",
+            payload=_frame_records_for_artifact(frame),
+            metadata={"rows": int(len(frame)), "source_path": str(source_path)},
+        )
+        return source_path
+
+    artifact_key = table_artifact_key(data_source, f"feature_importance:{model_name}")
     get_dashboard_artifact_store().upsert_json(
-        artifact_key=table_artifact_key(data_source, f"feature_importance:{model_name}"),
+        artifact_key=artifact_key,
         data_source=data_source,
         artifact_kind="table",
         payload=_frame_records_for_artifact(frame),
-        metadata={"rows": int(len(frame)), "source_path": str(source_path)},
+        metadata={"rows": int(len(frame)), "model_name": model_name},
     )
-    return source_path
+    return _artifact_ref(artifact_key)
 
 
 def save_model_stability_report(
@@ -973,19 +1515,30 @@ def save_model_stability_report(
     data_source: str,
     model_name: str,
     summary: dict[str, Any],
-) -> Path:
-    resolved_root = root or project_root()
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
-    filename = f"{model_name}_stability.json"
-    source_path = _write_json_variants(reports_dir, filename, data_source, summary)
+) -> str:
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+        filename = f"{model_name}_stability.json"
+        source_path = _write_json_variants(reports_dir, filename, data_source, summary)
+        get_dashboard_artifact_store().upsert_json(
+            artifact_key=json_artifact_key(data_source, f"stability:{model_name}"),
+            data_source=data_source,
+            artifact_kind="json",
+            payload=summary,
+            metadata={"source_path": str(source_path)},
+        )
+        return source_path
+
+    artifact_key = json_artifact_key(data_source, f"stability:{model_name}")
     get_dashboard_artifact_store().upsert_json(
-        artifact_key=json_artifact_key(data_source, f"stability:{model_name}"),
+        artifact_key=artifact_key,
         data_source=data_source,
         artifact_kind="json",
         payload=summary,
-        metadata={"source_path": str(source_path)},
+        metadata={"model_name": model_name},
     )
-    return source_path
+    return _artifact_ref(artifact_key)
 
 
 def save_ensemble_weights_report(
@@ -993,19 +1546,30 @@ def save_ensemble_weights_report(
     *,
     data_source: str,
     payload: dict[str, Any],
-) -> Path:
-    resolved_root = root or project_root()
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
-    filename = "ensemble_weights.json"
-    source_path = _write_json_variants(reports_dir, filename, data_source, payload)
+) -> str:
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+        filename = "ensemble_weights.json"
+        source_path = _write_json_variants(reports_dir, filename, data_source, payload)
+        get_dashboard_artifact_store().upsert_json(
+            artifact_key=json_artifact_key(data_source, "ensemble_weights"),
+            data_source=data_source,
+            artifact_kind="json",
+            payload=payload,
+            metadata={"source_path": str(source_path)},
+        )
+        return source_path
+
+    artifact_key = json_artifact_key(data_source, "ensemble_weights")
     get_dashboard_artifact_store().upsert_json(
-        artifact_key=json_artifact_key(data_source, "ensemble_weights"),
+        artifact_key=artifact_key,
         data_source=data_source,
         artifact_kind="json",
         payload=payload,
-        metadata={"source_path": str(source_path)},
+        metadata={"artifact_name": "ensemble_weights"},
     )
-    return source_path
+    return _artifact_ref(artifact_key)
 
 
 def save_inference_packet(
@@ -1013,19 +1577,30 @@ def save_inference_packet(
     *,
     data_source: str,
     payload: dict[str, Any],
-) -> Path:
-    resolved_root = root or project_root()
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
-    filename = "inference_packet.json"
-    source_path = _write_json_variants(reports_dir, filename, data_source, payload)
+) -> str:
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+        filename = "inference_packet.json"
+        source_path = _write_json_variants(reports_dir, filename, data_source, payload)
+        get_dashboard_artifact_store().upsert_json(
+            artifact_key=json_artifact_key(data_source, "inference_packet"),
+            data_source=data_source,
+            artifact_kind="json",
+            payload=payload,
+            metadata={"source_path": str(source_path)},
+        )
+        return source_path
+
+    artifact_key = json_artifact_key(data_source, "inference_packet")
     get_dashboard_artifact_store().upsert_json(
-        artifact_key=json_artifact_key(data_source, "inference_packet"),
+        artifact_key=artifact_key,
         data_source=data_source,
         artifact_kind="json",
         payload=payload,
-        metadata={"source_path": str(source_path)},
+        metadata={"artifact_name": "inference_packet"},
     )
-    return source_path
+    return _artifact_ref(artifact_key)
 
 
 def save_symbol_note(
@@ -1036,28 +1611,44 @@ def save_symbol_note(
     note_kind: str,
     plan_date: str,
     content: str,
-) -> Path:
-    resolved_root = root or project_root()
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
-    normalized_symbol = str(symbol or "").strip()
-    base_code = normalized_symbol.split(".")[0]
-    output_path = reports_dir / f"{base_code}_{note_kind}_{plan_date}.md"
-    save_text(content, output_path)
+) -> str:
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+        normalized_symbol = str(symbol or "").strip()
+        base_code = normalized_symbol.split(".")[0]
+        output_path = reports_dir / f"{base_code}_{note_kind}_{plan_date}.md"
+        save_text(content, output_path)
 
+        get_dashboard_artifact_store().upsert_text(
+            artifact_key=note_artifact_key(data_source, normalized_symbol, note_kind),
+            data_source=data_source,
+            artifact_kind="markdown",
+            content=content,
+            metadata={
+                "path": str(output_path),
+                "name": output_path.name,
+                "plan_date": plan_date,
+                "symbol": normalized_symbol,
+                "note_kind": note_kind,
+            },
+        )
+        return output_path
+
+    normalized_symbol = str(symbol or "").strip()
+    artifact_key = note_artifact_key(data_source, normalized_symbol, note_kind)
     get_dashboard_artifact_store().upsert_text(
-        artifact_key=note_artifact_key(data_source, normalized_symbol, note_kind),
+        artifact_key=artifact_key,
         data_source=data_source,
         artifact_kind="markdown",
         content=content,
         metadata={
-            "path": str(output_path),
-            "name": output_path.name,
             "plan_date": plan_date,
             "symbol": normalized_symbol,
             "note_kind": note_kind,
         },
     )
-    return output_path
+    return _artifact_ref(artifact_key)
 
 
 def save_overlay_outputs(
@@ -1069,57 +1660,95 @@ def save_overlay_outputs(
     packet: dict[str, Any],
     brief: str,
 ) -> dict[str, str]:
-    resolved_root = root or project_root()
-    reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+    if not _uses_primary_project_root(root):
+        resolved_root = root or project_root()
+        reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
+        is_inference = scope == "inference"
+
+        csv_name = "overlay_inference_candidates.csv" if is_inference else "overlay_latest_candidates.csv"
+        packet_name = "overlay_inference_packet.json" if is_inference else "overlay_latest_packet.json"
+        brief_name = "overlay_inference_brief.md" if is_inference else "overlay_latest_brief.md"
+
+        csv_source_path = source_prefixed_path(reports_dir, csv_name, data_source)
+        packet_source_path = source_prefixed_path(reports_dir, packet_name, data_source)
+        brief_source_path = source_prefixed_path(reports_dir, brief_name, data_source)
+
+        candidates.to_csv(csv_source_path, index=False, encoding="utf-8-sig")
+        candidates.to_csv(reports_dir / csv_name, index=False, encoding="utf-8-sig")
+        packet_text = json.dumps(packet, ensure_ascii=False, indent=2)
+        packet_source_path.write_text(packet_text, encoding="utf-8")
+        (reports_dir / packet_name).write_text(packet_text, encoding="utf-8")
+        save_text(brief, brief_source_path)
+        save_text(brief, reports_dir / brief_name)
+
+        store = get_dashboard_artifact_store()
+        candidate_key = "overlay_inference_candidates" if is_inference else "overlay_candidates"
+        packet_key = "overlay_inference_packet" if is_inference else "overlay_packet"
+        brief_key = "overlay_inference_brief" if is_inference else "overlay_brief"
+
+        store.upsert_json(
+            artifact_key=table_artifact_key(data_source, candidate_key),
+            data_source=data_source,
+            artifact_kind="table",
+            payload=_frame_records_for_artifact(candidates),
+            metadata={"rows": int(len(candidates)), "source_path": str(csv_source_path)},
+        )
+        store.upsert_json(
+            artifact_key=json_artifact_key(data_source, packet_key),
+            data_source=data_source,
+            artifact_kind="json",
+            payload=packet,
+            metadata={"source_path": str(packet_source_path)},
+        )
+        store.upsert_text(
+            artifact_key=text_artifact_key(data_source, brief_key),
+            data_source=data_source,
+            artifact_kind="text",
+            content=brief,
+            metadata={"source_path": str(brief_source_path)},
+        )
+
+        return {
+            "csv_source_path": str(csv_source_path),
+            "packet_source_path": str(packet_source_path),
+            "brief_source_path": str(brief_source_path),
+        }
+
     is_inference = scope == "inference"
-
-    csv_name = "overlay_inference_candidates.csv" if is_inference else "overlay_latest_candidates.csv"
-    packet_name = "overlay_inference_packet.json" if is_inference else "overlay_latest_packet.json"
-    brief_name = "overlay_inference_brief.md" if is_inference else "overlay_latest_brief.md"
-
-    csv_source_path = source_prefixed_path(reports_dir, csv_name, data_source)
-    packet_source_path = source_prefixed_path(reports_dir, packet_name, data_source)
-    brief_source_path = source_prefixed_path(reports_dir, brief_name, data_source)
-
-    candidates.to_csv(csv_source_path, index=False, encoding="utf-8-sig")
-    candidates.to_csv(reports_dir / csv_name, index=False, encoding="utf-8-sig")
-    packet_text = json.dumps(packet, ensure_ascii=False, indent=2)
-    packet_source_path.write_text(packet_text, encoding="utf-8")
-    (reports_dir / packet_name).write_text(packet_text, encoding="utf-8")
-    save_text(brief, brief_source_path)
-    save_text(brief, reports_dir / brief_name)
-
     store = get_dashboard_artifact_store()
     candidate_key = "overlay_inference_candidates" if is_inference else "overlay_candidates"
     packet_key = "overlay_inference_packet" if is_inference else "overlay_packet"
     brief_key = "overlay_inference_brief" if is_inference else "overlay_brief"
+    candidate_artifact_key = table_artifact_key(data_source, candidate_key)
+    packet_artifact_key = json_artifact_key(data_source, packet_key)
+    brief_artifact_key = text_artifact_key(data_source, brief_key)
 
     store.upsert_json(
-        artifact_key=table_artifact_key(data_source, candidate_key),
+        artifact_key=candidate_artifact_key,
         data_source=data_source,
         artifact_kind="table",
         payload=_frame_records_for_artifact(candidates),
-        metadata={"rows": int(len(candidates)), "source_path": str(csv_source_path)},
+        metadata={"rows": int(len(candidates)), "scope": scope},
     )
     store.upsert_json(
-        artifact_key=json_artifact_key(data_source, packet_key),
+        artifact_key=packet_artifact_key,
         data_source=data_source,
         artifact_kind="json",
         payload=packet,
-        metadata={"source_path": str(packet_source_path)},
+        metadata={"scope": scope},
     )
     store.upsert_text(
-        artifact_key=text_artifact_key(data_source, brief_key),
+        artifact_key=brief_artifact_key,
         data_source=data_source,
         artifact_kind="text",
         content=brief,
-        metadata={"source_path": str(brief_source_path)},
+        metadata={"scope": scope},
     )
 
     return {
-        "csv_source_path": str(csv_source_path),
-        "packet_source_path": str(packet_source_path),
-        "brief_source_path": str(brief_source_path),
+        "csv_source_path": _artifact_ref(candidate_artifact_key),
+        "packet_source_path": _artifact_ref(packet_artifact_key),
+        "brief_source_path": _artifact_ref(brief_artifact_key),
     }
 
 
@@ -1133,52 +1762,98 @@ def save_llm_bridge_outputs(
     response_jsonl_text: str = "",
     response_summary_text: str,
 ) -> dict[str, str]:
-    resolved_reports_dir = ensure_dir(reports_dir)
+    if not _is_within_primary_project_root(reports_dir):
+        resolved_reports_dir = ensure_dir(reports_dir)
 
-    request_jsonl_filename = f"{output_prefix}_requests.jsonl"
-    request_summary_filename = f"{output_prefix}_summary.md"
-    response_jsonl_filename = f"{output_prefix}_responses.jsonl"
-    response_summary_filename = f"{output_prefix}_response_summary.md"
+        request_jsonl_filename = f"{output_prefix}_requests.jsonl"
+        request_summary_filename = f"{output_prefix}_summary.md"
+        response_jsonl_filename = f"{output_prefix}_responses.jsonl"
+        response_summary_filename = f"{output_prefix}_response_summary.md"
 
-    request_jsonl_path = source_prefixed_path(resolved_reports_dir, request_jsonl_filename, data_source)
-    save_text(request_jsonl_text, request_jsonl_path)
-    save_text(request_jsonl_text, resolved_reports_dir / request_jsonl_filename)
+        request_jsonl_path = source_prefixed_path(resolved_reports_dir, request_jsonl_filename, data_source)
+        save_text(request_jsonl_text, request_jsonl_path)
+        save_text(request_jsonl_text, resolved_reports_dir / request_jsonl_filename)
 
-    request_summary_path = source_prefixed_path(resolved_reports_dir, request_summary_filename, data_source)
-    save_text(request_summary_text, request_summary_path)
-    save_text(request_summary_text, resolved_reports_dir / request_summary_filename)
+        request_summary_path = source_prefixed_path(resolved_reports_dir, request_summary_filename, data_source)
+        save_text(request_summary_text, request_summary_path)
+        save_text(request_summary_text, resolved_reports_dir / request_summary_filename)
 
-    response_jsonl_path = Path()
-    if response_jsonl_text:
-        response_jsonl_path = source_prefixed_path(resolved_reports_dir, response_jsonl_filename, data_source)
-        save_text(response_jsonl_text, response_jsonl_path)
-        save_text(response_jsonl_text, resolved_reports_dir / response_jsonl_filename)
-    else:
-        for stale_path in (
-            source_prefixed_path(resolved_reports_dir, response_jsonl_filename, data_source),
-            resolved_reports_dir / response_jsonl_filename,
-        ):
-            if stale_path.exists():
-                stale_path.unlink()
+        response_jsonl_path = Path()
+        if response_jsonl_text:
+            response_jsonl_path = source_prefixed_path(resolved_reports_dir, response_jsonl_filename, data_source)
+            save_text(response_jsonl_text, response_jsonl_path)
+            save_text(response_jsonl_text, resolved_reports_dir / response_jsonl_filename)
+        else:
+            for stale_path in (
+                source_prefixed_path(resolved_reports_dir, response_jsonl_filename, data_source),
+                resolved_reports_dir / response_jsonl_filename,
+            ):
+                if stale_path.exists():
+                    stale_path.unlink()
 
-    response_summary_path = source_prefixed_path(resolved_reports_dir, response_summary_filename, data_source)
-    save_text(response_summary_text, response_summary_path)
-    save_text(response_summary_text, resolved_reports_dir / response_summary_filename)
+        response_summary_path = source_prefixed_path(resolved_reports_dir, response_summary_filename, data_source)
+        save_text(response_summary_text, response_summary_path)
+        save_text(response_summary_text, resolved_reports_dir / response_summary_filename)
+
+        store = get_dashboard_artifact_store()
+        store.upsert_text(
+            artifact_key=llm_bridge_export_artifact_key(data_source, output_prefix, "requests"),
+            data_source=data_source,
+            artifact_kind="jsonl",
+            content=request_jsonl_text,
+            metadata={"path": str(request_jsonl_path), "name": request_jsonl_path.name},
+        )
+        store.upsert_text(
+            artifact_key=llm_bridge_export_artifact_key(data_source, output_prefix, "summary"),
+            data_source=data_source,
+            artifact_kind="markdown",
+            content=request_summary_text,
+            metadata={"path": str(request_summary_path), "name": request_summary_path.name},
+        )
+
+        is_inference = output_prefix == "overlay_inference_llm"
+        response_jsonl_artifact_key = overlay_llm_responses_artifact_key(data_source, "inference" if is_inference else "historical")
+        response_summary_artifact_key = overlay_llm_response_summary_artifact_key(data_source, "inference" if is_inference else "historical")
+
+        if response_jsonl_text:
+            store.upsert_text(
+                artifact_key=response_jsonl_artifact_key,
+                data_source=data_source,
+                artifact_kind="jsonl",
+                content=response_jsonl_text,
+                metadata={"path": str(response_jsonl_path), "name": response_jsonl_path.name},
+            )
+        store.upsert_text(
+            artifact_key=response_summary_artifact_key,
+            data_source=data_source,
+            artifact_kind="markdown",
+            content=response_summary_text,
+            metadata={"path": str(response_summary_path), "name": response_summary_path.name},
+        )
+
+        return {
+            "jsonl_path": str(request_jsonl_path),
+            "summary_path": str(request_summary_path),
+            "response_jsonl_path": str(response_jsonl_path) if response_jsonl_text else "",
+            "response_summary_path": str(response_summary_path),
+        }
 
     store = get_dashboard_artifact_store()
+    request_jsonl_key = llm_bridge_export_artifact_key(data_source, output_prefix, "requests")
+    request_summary_key = llm_bridge_export_artifact_key(data_source, output_prefix, "summary")
     store.upsert_text(
-        artifact_key=llm_bridge_export_artifact_key(data_source, output_prefix, "requests"),
+        artifact_key=request_jsonl_key,
         data_source=data_source,
         artifact_kind="jsonl",
         content=request_jsonl_text,
-        metadata={"path": str(request_jsonl_path), "name": request_jsonl_path.name},
+        metadata={"output_prefix": output_prefix},
     )
     store.upsert_text(
-        artifact_key=llm_bridge_export_artifact_key(data_source, output_prefix, "summary"),
+        artifact_key=request_summary_key,
         data_source=data_source,
         artifact_kind="markdown",
         content=request_summary_text,
-        metadata={"path": str(request_summary_path), "name": request_summary_path.name},
+        metadata={"output_prefix": output_prefix},
     )
 
     is_inference = output_prefix == "overlay_inference_llm"
@@ -1191,21 +1866,21 @@ def save_llm_bridge_outputs(
             data_source=data_source,
             artifact_kind="jsonl",
             content=response_jsonl_text,
-            metadata={"path": str(response_jsonl_path), "name": response_jsonl_path.name},
+            metadata={"output_prefix": output_prefix},
         )
     store.upsert_text(
         artifact_key=response_summary_artifact_key,
         data_source=data_source,
         artifact_kind="markdown",
         content=response_summary_text,
-        metadata={"path": str(response_summary_path), "name": response_summary_path.name},
+        metadata={"output_prefix": output_prefix},
     )
 
     return {
-        "jsonl_path": str(request_jsonl_path),
-        "summary_path": str(request_summary_path),
-        "response_jsonl_path": str(response_jsonl_path) if response_jsonl_text else "",
-        "response_summary_path": str(response_summary_path),
+        "jsonl_path": _artifact_ref(request_jsonl_key),
+        "summary_path": _artifact_ref(request_summary_key),
+        "response_jsonl_path": _artifact_ref(response_jsonl_artifact_key) if response_jsonl_text else "",
+        "response_summary_path": _artifact_ref(response_summary_artifact_key),
     }
 
 
@@ -1236,3 +1911,193 @@ def _artifact_json_ready(value: Any) -> Any:
         except Exception:
             return str(value)
     return value
+
+
+def _watchlist_scope_sql(scope: str) -> str:
+    scope_sql = {
+        "all": "",
+        "holdings": "and item ->> 'entry_group' = '持仓'",
+        "focus": "and item ->> 'entry_group' = '重点关注'",
+        "overlay": "and coalesce((item ->> 'is_overlay_selected')::boolean, false)",
+        "inference": "and coalesce((item ->> 'is_inference_overlay_selected')::boolean, false)",
+        "loss": "and coalesce(nullif(item ->> 'unrealized_pnl_pct', '')::double precision, 0) <= -0.1",
+    }
+    return scope_sql.get(str(scope or "all").strip(), "")
+
+
+def _watchlist_sort_sql(sort_by: str) -> str:
+    sort_sql = {
+        "inference_rank": "coalesce(nullif(item ->> 'inference_ensemble_rank', '')::double precision, 'Infinity'::double precision) asc, item ->> 'ts_code' asc",
+        "historical_rank": "coalesce(nullif(item ->> 'ensemble_rank', '')::double precision, 'Infinity'::double precision) asc, item ->> 'ts_code' asc",
+        "drawdown": "coalesce(nullif(item ->> 'unrealized_pnl_pct', '')::double precision, 'Infinity'::double precision) asc, item ->> 'ts_code' asc",
+        "market_value": "coalesce(nullif(item ->> 'market_value', '')::double precision, '-Infinity'::double precision) desc, item ->> 'ts_code' asc",
+    }
+    return sort_sql.get(str(sort_by or "inference_rank").strip(), sort_sql["inference_rank"])
+
+
+def _load_watchlist_summary_records_from_database(
+    *,
+    artifact_key: str,
+    field_names: list[str],
+    keyword: str,
+    scope: str,
+    sort_by: str,
+    page: int,
+    page_size: int,
+) -> list[dict[str, Any]]:
+    projected_fields = ", ".join(
+        f"'{field_name}', item -> '{field_name}'"
+        for field_name in field_names
+    )
+    normalized_keyword = str(keyword or "").strip().lower()
+    where_clauses = [
+        "artifact_key = %s",
+        "payload_json is not null",
+        "jsonb_typeof(payload_json) = 'array'",
+    ]
+    params: list[Any] = [artifact_key]
+    if normalized_keyword:
+        where_clauses.append(
+            "(coalesce(lower(item ->> 'ts_code'), '') like %s or coalesce(lower(item ->> 'name'), '') like %s)"
+        )
+        keyword_pattern = f"%{normalized_keyword}%"
+        params.extend([keyword_pattern, keyword_pattern])
+
+    scope_sql = _watchlist_scope_sql(scope)
+    if scope_sql:
+        where_clauses.append(scope_sql.removeprefix("and ").strip())
+
+    query = f"""
+        select jsonb_build_object({projected_fields}) as projected
+        from dashboard_artifacts,
+             jsonb_array_elements(payload_json) as item
+        where {' and '.join(where_clauses)}
+        order by {_watchlist_sort_sql(sort_by)}
+        limit %s
+        offset %s
+    """
+    normalized_page_size = max(1, int(page_size))
+    normalized_page = max(1, int(page))
+    params.extend([normalized_page_size, (normalized_page - 1) * normalized_page_size])
+    with connect_database(use_dict_rows=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            rows = cur.fetchall()
+        conn.commit()
+    return [dict(row.get("projected") or {}) for row in rows]
+
+
+def _load_watchlist_overview_from_database(*, artifact_key: str) -> dict[str, Any]:
+    query = """
+        select
+            count(*) as total_count,
+            sum(case when coalesce((item ->> 'is_overlay_selected')::boolean, false) then 1 else 0 end) as overlay_count,
+            sum(case when coalesce((item ->> 'is_inference_overlay_selected')::boolean, false) then 1 else 0 end) as inference_overlay_count,
+            sum(coalesce(nullif(item ->> 'market_value', '')::double precision, 0)) as market_value,
+            sum(coalesce(nullif(item ->> 'unrealized_pnl', '')::double precision, 0)) as unrealized_pnl
+        from dashboard_artifacts,
+             jsonb_array_elements(payload_json) as item
+        where artifact_key = %s
+          and payload_json is not null
+          and jsonb_typeof(payload_json) = 'array'
+    """
+    with connect_database(use_dict_rows=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, (artifact_key,))
+            row = cur.fetchone()
+        conn.commit()
+    if not row:
+        return {
+            "totalCount": 0,
+            "overlayCount": 0,
+            "inferenceOverlayCount": 0,
+            "marketValue": 0.0,
+            "unrealizedPnl": 0.0,
+        }
+    return {
+        "totalCount": int(row.get("total_count", 0) or 0),
+        "overlayCount": int(row.get("overlay_count", 0) or 0),
+        "inferenceOverlayCount": int(row.get("inference_overlay_count", 0) or 0),
+        "marketValue": float(row.get("market_value", 0) or 0.0),
+        "unrealizedPnl": float(row.get("unrealized_pnl", 0) or 0.0),
+    }
+
+
+def _load_watchlist_filtered_count_from_database(
+    *,
+    artifact_key: str,
+    keyword: str,
+    scope: str,
+) -> int:
+    normalized_keyword = str(keyword or "").strip().lower()
+    where_clauses = [
+        "artifact_key = %s",
+        "payload_json is not null",
+        "jsonb_typeof(payload_json) = 'array'",
+    ]
+    params: list[Any] = [artifact_key]
+    if normalized_keyword:
+        where_clauses.append(
+            "(coalesce(lower(item ->> 'ts_code'), '') like %s or coalesce(lower(item ->> 'name'), '') like %s)"
+        )
+        keyword_pattern = f"%{normalized_keyword}%"
+        params.extend([keyword_pattern, keyword_pattern])
+
+    scope_sql = _watchlist_scope_sql(scope)
+    if scope_sql:
+        where_clauses.append(scope_sql.removeprefix("and ").strip())
+
+    query = f"""
+        select count(*)
+        from dashboard_artifacts,
+             jsonb_array_elements(payload_json) as item
+        where {' and '.join(where_clauses)}
+    """
+    with connect_database(use_dict_rows=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            row = cur.fetchone()
+        conn.commit()
+    return int((row or {}).get("count", 0) or 0)
+
+
+def _filter_watchlist_snapshot_frame(
+    frame: pd.DataFrame,
+    *,
+    keyword: str,
+    scope: str,
+    sort_by: str,
+) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+
+    filtered = frame.copy()
+    normalized_keyword = str(keyword or "").strip().lower()
+    if normalized_keyword:
+        filtered = filtered.loc[
+            filtered["ts_code"].astype(str).str.lower().str.contains(normalized_keyword)
+            | filtered["name"].astype(str).str.lower().str.contains(normalized_keyword)
+        ].copy()
+
+    if scope == "holdings":
+        filtered = filtered.loc[filtered["entry_group"].astype(str) == "持仓"].copy()
+    elif scope == "focus":
+        filtered = filtered.loc[filtered["entry_group"].astype(str) == "重点关注"].copy()
+    elif scope == "overlay":
+        filtered = filtered.loc[filtered["is_overlay_selected"].fillna(False)].copy()
+    elif scope == "inference":
+        filtered = filtered.loc[filtered["is_inference_overlay_selected"].fillna(False)].copy()
+    elif scope == "loss":
+        filtered = filtered.loc[pd.to_numeric(filtered["unrealized_pnl_pct"], errors="coerce") <= -0.1].copy()
+
+    sort_map = {
+        "inference_rank": ("inference_ensemble_rank", True),
+        "historical_rank": ("ensemble_rank", True),
+        "drawdown": ("unrealized_pnl_pct", True),
+        "market_value": ("market_value", False),
+    }
+    sort_column, ascending = sort_map.get(sort_by, sort_map["inference_rank"])
+    if sort_column in filtered.columns:
+        filtered = filtered.assign(_sort_value=pd.to_numeric(filtered[sort_column], errors="coerce"))
+        filtered = filtered.sort_values("_sort_value", ascending=ascending, na_position="last").drop(columns="_sort_value")
+    return filtered.reset_index(drop=True)

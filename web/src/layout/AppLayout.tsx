@@ -112,6 +112,7 @@ export function AppLayout({
         <div className="app-topbar__inner">
           <div className="app-topbar__brand-group">
             <div className="app-topbar__brand-stack">
+              <div className="app-topbar__eyebrow">Research Terminal</div>
               <div className="app-topbar__brand-line">
                 <strong className="app-topbar__brand">OpenLianghua</strong>
                 <span className="app-topbar__divider" aria-hidden="true">

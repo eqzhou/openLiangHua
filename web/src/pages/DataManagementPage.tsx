@@ -14,6 +14,7 @@ import { useToast } from '../components/ToastProvider'
 import { WorkspaceHero } from '../components/WorkspaceHero'
 import { dataManagementClient } from '../facades/dashboardPageClient'
 import { formatDateTime, formatValue } from '../lib/format'
+import { DATA_MANAGEMENT_REFETCH_INTERVAL_MS } from '../lib/polling'
 import type { ActionResult, DataArtifactStatus, DataManagementPayload } from '../types/api'
 
 interface DataManagementPageProps {
@@ -45,7 +46,7 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
   const dataQuery = useQuery({
     queryKey: dataManagementClient.queryKey(),
     queryFn: () => apiGet<DataManagementPayload>(dataManagementClient.path()),
-    refetchInterval: 15_000,
+    refetchInterval: DATA_MANAGEMENT_REFETCH_INTERVAL_MS,
   })
 
   const incrementalRefreshMutation = useMutation({
@@ -98,8 +99,9 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
 
   const payload = dataQuery.data
   const dailyBar = payload?.dailyBar ?? { exists: false, rowCount: 0, symbolCount: 0 }
-  const featurePanel = payload?.featurePanel ?? { exists: false, rowCount: 0, symbolCount: 0 }
-  const labelPanel = payload?.labelPanel ?? { exists: false, rowCount: 0, symbolCount: 0 }
+  const researchPanel = payload?.researchPanel ?? { exists: false, rowCount: 0, symbolCount: 0 }
+  const legacyFeatureView = payload?.legacyFeatureView ?? { exists: false, rowCount: 0, symbolCount: 0 }
+  const legacyLabelView = payload?.legacyLabelView ?? { exists: false, rowCount: 0, symbolCount: 0 }
   const datasetSummary = (payload?.datasetSummary ?? {}) as Record<string, unknown>
   const tokenConfigured = payload?.tokenConfigured ?? null
   const hasToken = tokenConfigured === true
@@ -131,8 +133,8 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
           helper={authenticated ? (payload?.envFileExists ? '检测到 .env' : '未发现 .env') : '登录后显示'}
         />
         <MetricCard label="日线最新日期" value={dailyBar.latestTradeDate ?? '-'} tone={dailyBar.exists ? 'good' : 'warn'} />
-        <MetricCard label="特征最新日期" value={featurePanel.latestTradeDate ?? '-'} tone={featurePanel.exists ? 'good' : 'warn'} />
-        <MetricCard label="标签最新日期" value={labelPanel.latestTradeDate ?? '-'} tone={labelPanel.exists ? 'good' : 'warn'} />
+        <MetricCard label="研究面板最新日期" value={researchPanel.latestTradeDate ?? '-'} tone={researchPanel.exists ? 'good' : 'warn'} />
+        <MetricCard label="研究面板股票数" value={researchPanel.symbolCount ?? 0} tone={researchPanel.exists ? 'good' : 'warn'} />
       </div>
 
       <Panel title="状态" tone="warm" className="panel--summary-surface">
@@ -147,11 +149,11 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
           <SpotlightCard
             title="本地研究数据状态"
             meta={`当前源 ${actualSource}`}
-            subtitle={`日线最新日期 ${dailyBar.latestTradeDate ?? '-'}，特征最新日期 ${featurePanel.latestTradeDate ?? '-'}，标签最新日期 ${labelPanel.latestTradeDate ?? '-'}`}
+            subtitle={`日线最新日期 ${dailyBar.latestTradeDate ?? '-'}，研究面板最新日期 ${researchPanel.latestTradeDate ?? '-'}。`}
             metrics={[
               { label: '日线行数', value: dailyBar.rowCount ?? 0, tone: dailyBar.exists ? 'good' : 'warn' },
-              { label: '特征行数', value: featurePanel.rowCount ?? 0, tone: featurePanel.exists ? 'good' : 'warn' },
-              { label: '标签行数', value: labelPanel.rowCount ?? 0, tone: labelPanel.exists ? 'good' : 'warn' },
+              { label: '研究面板行数', value: researchPanel.rowCount ?? 0, tone: researchPanel.exists ? 'good' : 'warn' },
+              { label: '研究面板股票数', value: researchPanel.symbolCount ?? 0, tone: researchPanel.exists ? 'good' : 'warn' },
               { label: '缓存股票数', value: formatValue(datasetSummary.cached_symbols ?? 0) },
             ]}
           />
@@ -233,11 +235,14 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
           <SectionBlock title="日线面板" tone="muted">
             <PropertyGrid items={buildArtifactMetrics(dailyBar)} />
           </SectionBlock>
-          <SectionBlock title="特征面板" tone="muted">
-            <PropertyGrid items={buildArtifactMetrics(featurePanel)} />
+          <SectionBlock title="研究面板" tone="muted">
+            <PropertyGrid items={buildArtifactMetrics(researchPanel)} />
           </SectionBlock>
-          <SectionBlock title="标签面板" tone="muted">
-            <PropertyGrid items={buildArtifactMetrics(labelPanel)} />
+          <SectionBlock title="旧特征兼容视图" tone="muted" collapsible defaultExpanded={false}>
+            <PropertyGrid items={buildArtifactMetrics(legacyFeatureView)} />
+          </SectionBlock>
+          <SectionBlock title="旧标签兼容视图" tone="muted" collapsible defaultExpanded={false}>
+            <PropertyGrid items={buildArtifactMetrics(legacyLabelView)} />
           </SectionBlock>
         </SupportPanel>
 

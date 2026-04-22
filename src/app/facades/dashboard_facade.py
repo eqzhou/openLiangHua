@@ -41,9 +41,12 @@ from src.app.services.dashboard_data_service import (
     load_experiment_config,
     build_candidate_snapshot,
     load_feature_importance,
+    load_feature_history_for_symbol,
     load_feature_panel,
     load_latest_symbol_markdown,
     load_metrics,
+    load_overlay_candidate_record,
+    load_overlay_candidate_summary_records,
     load_overlay_brief,
     load_overlay_candidates,
     load_overlay_inference_brief,
@@ -53,14 +56,24 @@ from src.app.services.dashboard_data_service import (
     load_overlay_inference_packet,
     load_overlay_packet,
     load_portfolio,
+    load_prediction_history_for_symbol,
     load_predictions,
     load_stability,
     load_watchlist_config,
+    load_watchlist_filtered_count,
+    load_watchlist_record,
+    load_watchlist_overview,
+    load_watchlist_summary_records,
     run_module,
     save_experiment_config,
     sync_dashboard_database,
 )
-from src.app.services.realtime_quote_service import fetch_managed_realtime_quotes, merge_realtime_quotes
+from src.app.services.realtime_quote_service import (
+    fetch_managed_realtime_quotes,
+    merge_realtime_quote_record,
+    merge_realtime_quote_records,
+    merge_realtime_quotes,
+)
 from src.app.services.streamlit_runtime_service import get_streamlit_service_status
 from src.app.services.watchlist_service import build_reduce_plan, filtered_watchlist_view
 from src.data.tushare_workflows import run_tushare_full_refresh, run_tushare_incremental_refresh
@@ -100,6 +113,74 @@ def _frame_records(frame: pd.DataFrame, *, limit: int | None = None) -> list[dic
     if limit is not None:
         working = working.head(limit)
     return [_json_ready(record) for record in working.to_dict(orient="records")]
+
+
+WATCHLIST_SUMMARY_RECORD_FIELDS = [
+    "ts_code",
+    "name",
+    "industry",
+    "source_tags",
+    "source_category",
+    "entry_group",
+    "is_watch_only",
+    "is_overlay_selected",
+    "is_inference_overlay_selected",
+    "mark_price",
+    "realtime_price",
+    "realtime_pct_chg",
+    "unrealized_pnl_pct",
+    "ensemble_rank",
+    "ensemble_rank_pct",
+    "universe_size",
+    "inference_ensemble_rank",
+    "inference_ensemble_rank_pct",
+    "premarket_plan",
+    "llm_latest_status",
+    "llm_latest_summary",
+    "action_brief",
+    "watch_level",
+    "realtime_quote_source",
+    "realtime_time",
+    "market_value",
+]
+
+AI_REVIEW_SUMMARY_CANDIDATE_FIELDS = [
+    "ts_code",
+    "name",
+    "trade_date",
+    "industry_display",
+    "industry",
+    "action_hint",
+    "confidence_level",
+    "final_score",
+    "quant_score",
+    "factor_overlay_score",
+    "model_consensus",
+]
+
+AI_REVIEW_SUMMARY_SELECTED_FIELDS = AI_REVIEW_SUMMARY_CANDIDATE_FIELDS + [
+    "thesis_summary",
+    "theme_tags",
+]
+
+CANDIDATE_SUMMARY_FIELDS = [
+    "ts_code",
+    "name",
+    "industry",
+    "rank",
+    "score",
+    "rank_pct",
+    "pct_chg",
+    "mom_20",
+    "close_to_ma_20",
+    "ret_t1_t10",
+    "action_hint",
+    "trade_date",
+]
+
+
+def _project_record_fields(record: dict[str, Any], field_names: list[str]) -> dict[str, Any]:
+    return {field_name: _json_ready(record.get(field_name)) for field_name in field_names if field_name in record}
 
 
 def clear_dashboard_caches() -> None:
@@ -259,74 +340,38 @@ def _build_home_alerts(
 
 
 def _get_home_watchlist_payload() -> dict[str, Any]:
-    watchlist_view = build_watchlist_base_frame()
-    realtime_status = _empty_realtime_status()
-
-    if not watchlist_view.empty:
-        try:
-            latest_snapshot = get_realtime_quote_store().get_latest_snapshot()
-        except Exception as exc:  # pragma: no cover - defensive path
-            latest_snapshot = None
-            realtime_status = _decorate_realtime_status(
-                {
-                    **realtime_status,
-                    "error_message": f"读取缓存快照失败：{exc}",
-                }
-            )
-        if latest_snapshot is not None and not latest_snapshot.quotes.empty:
-            watchlist_view = merge_realtime_quotes(watchlist_view, latest_snapshot.quotes)
-            realtime_status = _decorate_realtime_status(
-                {
-                    **dict(latest_snapshot.status),
-                    "available": True,
-                    "trade_date": latest_snapshot.trade_date,
-                    "snapshot_bucket": latest_snapshot.snapshot_bucket,
-                    "served_from": "database",
-                }
-            )
-
-    filtered = filtered_watchlist_view(
-        watchlist_view,
+    payload = get_watchlist_summary_payload(
         keyword="",
-        scope=WATCH_SCOPE_MAP.get("all", "全部"),
-        sort_by=WATCH_SORT_MAP.get("inference_rank", "最新推理排名"),
+        scope="all",
+        sort_by="inference_rank",
+        include_realtime=False,
     )
-    overview = {
-        "totalCount": int(len(watchlist_view)),
-        "overlayCount": int(watchlist_view["is_overlay_selected"].fillna(False).sum()) if not watchlist_view.empty and "is_overlay_selected" in watchlist_view.columns else 0,
-        "inferenceOverlayCount": int(watchlist_view["is_inference_overlay_selected"].fillna(False).sum()) if not watchlist_view.empty and "is_inference_overlay_selected" in watchlist_view.columns else 0,
-        "marketValue": float(pd.to_numeric(watchlist_view["market_value"], errors="coerce").sum()) if not watchlist_view.empty and "market_value" in watchlist_view.columns else 0.0,
-        "unrealizedPnl": float(pd.to_numeric(watchlist_view["unrealized_pnl"], errors="coerce").sum()) if not watchlist_view.empty and "unrealized_pnl" in watchlist_view.columns else 0.0,
-    }
+    records = list(payload.get("records", []) or [])[:6]
     return {
-        "overview": _json_ready(overview),
-        "realtimeStatus": _json_ready(realtime_status),
-        "records": _frame_records(filtered, limit=6),
+        "overview": _json_ready(payload.get("overview", {})),
+        "realtimeStatus": _json_ready(payload.get("realtimeStatus", {})),
+        "records": _json_ready(records),
     }
 
 
 def _get_home_payload_cached() -> dict[str, Any]:
+    return {
+        **get_home_summary_payload(),
+        "watchlist": get_home_watchlist_section_payload(),
+        "candidates": get_home_candidates_section_payload(),
+        "aiReview": get_home_ai_review_section_payload(),
+    }
+
+
+def get_home_payload() -> dict[str, Any]:
+    return copy.deepcopy(_get_home_payload_cached())
+
+
+def get_home_summary_payload() -> dict[str, Any]:
     shell_payload = get_shell_payload()
-    overview_payload = get_overview_payload("test")
+    overview_payload = get_overview_summary_payload("test")
     watchlist_payload = _get_home_watchlist_payload()
-    candidates_payload = get_candidates_summary_payload(model_name="ensemble", split_name="test", top_n=6)
-    ai_review_payload = get_ai_review_summary_payload()
-
     comparison = list(overview_payload.get("comparison", []) or [])
-    watchlist_records = list(watchlist_payload.get("records", []) or [])[:6]
-    candidate_records = list(candidates_payload.get("latestPicks", []) or [])[:6]
-    inference_records = list(dict(ai_review_payload.get("inference", {}) or {}).get("candidates", []) or [])[:6]
-    historical_records = list(dict(ai_review_payload.get("historical", {}) or {}).get("candidates", []) or [])[:6]
-
-    focus_watch_record = dict(watchlist_records[0]) if watchlist_records else {}
-    focus_candidate_record = (
-        dict(inference_records[0])
-        if inference_records
-        else dict(candidate_records[0])
-        if candidate_records
-        else {}
-    )
-
     return {
         "configSummaryText": str(shell_payload.get("configSummaryText", "") or ""),
         "service": _json_ready(shell_payload.get("service", {})),
@@ -337,25 +382,6 @@ def _get_home_payload_cached() -> dict[str, Any]:
             "bestSharpe": _best_comparison_record(comparison, "daily_portfolio_sharpe", mode="max"),
             "bestDrawdown": _best_comparison_record(comparison, "daily_portfolio_max_drawdown", mode="min"),
         },
-        "watchlist": {
-            "overview": _json_ready(watchlist_payload.get("overview", {})),
-            "realtimeStatus": _json_ready(watchlist_payload.get("realtimeStatus", {})),
-            "records": _json_ready(watchlist_records),
-            "focusRecord": _json_ready(focus_watch_record),
-        },
-        "candidates": {
-            "modelName": str(candidates_payload.get("modelName", "ensemble") or "ensemble"),
-            "splitName": str(candidates_payload.get("splitName", "test") or "test"),
-            "latestDate": _json_ready(candidates_payload.get("latestDate")),
-            "records": _json_ready(candidate_records),
-            "focusRecord": _json_ready(dict(candidate_records[0]) if candidate_records else {}),
-        },
-        "aiReview": {
-            "inferenceRecords": _json_ready(inference_records),
-            "historicalRecords": _json_ready(historical_records),
-            "focusRecord": _json_ready(focus_candidate_record),
-            "shortlistMarkdown": load_overlay_inference_shortlist(),
-        },
         "alerts": _json_ready(
             _build_home_alerts(
                 service_payload=dict(shell_payload.get("service", {}) or {}),
@@ -365,11 +391,48 @@ def _get_home_payload_cached() -> dict[str, Any]:
     }
 
 
-def get_home_payload() -> dict[str, Any]:
-    return copy.deepcopy(_get_home_payload_cached())
+def get_home_watchlist_section_payload() -> dict[str, Any]:
+    watchlist_payload = _get_home_watchlist_payload()
+    watchlist_records = list(watchlist_payload.get("records", []) or [])[:6]
+    focus_watch_record = dict(watchlist_records[0]) if watchlist_records else {}
+    return {
+        "overview": _json_ready(watchlist_payload.get("overview", {})),
+        "realtimeStatus": _json_ready(watchlist_payload.get("realtimeStatus", {})),
+        "records": _json_ready(watchlist_records),
+        "focusRecord": _json_ready(focus_watch_record),
+    }
 
 
-def get_overview_payload(split_name: str = "test") -> dict[str, Any]:
+def get_home_candidates_section_payload() -> dict[str, Any]:
+    candidates_payload = get_candidates_summary_payload(model_name="ensemble", split_name="test", top_n=6)
+    candidate_records = list(candidates_payload.get("latestPicks", []) or [])[:6]
+    return {
+        "modelName": str(candidates_payload.get("modelName", "ensemble") or "ensemble"),
+        "splitName": str(candidates_payload.get("splitName", "test") or "test"),
+        "latestDate": _json_ready(candidates_payload.get("latestDate")),
+        "records": _json_ready(candidate_records),
+        "focusRecord": _json_ready(dict(candidate_records[0]) if candidate_records else {}),
+    }
+
+
+def get_home_ai_review_section_payload() -> dict[str, Any]:
+    ai_review_payload = get_ai_review_summary_payload()
+    inference_records = list(dict(ai_review_payload.get("inference", {}) or {}).get("candidates", []) or [])[:6]
+    historical_records = list(dict(ai_review_payload.get("historical", {}) or {}).get("candidates", []) or [])[:6]
+    focus_candidate_record = (
+        dict(inference_records[0])
+        if inference_records
+        else {}
+    )
+    return {
+        "inferenceRecords": _json_ready(inference_records),
+        "historicalRecords": _json_ready(historical_records),
+        "focusRecord": _json_ready(focus_candidate_record),
+        "shortlistMarkdown": load_overlay_inference_shortlist(),
+    }
+
+
+def get_overview_summary_payload(split_name: str = "test") -> dict[str, Any]:
     summary = load_dataset_summary()
     metrics_table = build_metrics_table()
     shown_columns = [
@@ -384,6 +447,14 @@ def get_overview_payload(split_name: str = "test") -> dict[str, Any]:
         "avg_turnover_ratio",
     ]
     comparison = build_model_comparison_frame(metrics_table, shown_columns)
+    return {
+        "summary": _json_ready(summary),
+        "comparison": _frame_records(comparison),
+        "selectedSplit": split_name,
+    }
+
+
+def get_overview_curves_payload(split_name: str = "test") -> dict[str, Any]:
     equity_curves = build_equity_curve_frame(
         model_names=MODEL_NAMES,
         split_name=split_name,
@@ -391,10 +462,15 @@ def get_overview_payload(split_name: str = "test") -> dict[str, Any]:
         load_portfolio=load_portfolio,
     )
     return {
-        "summary": _json_ready(summary),
-        "comparison": _frame_records(comparison),
-        "equityCurves": _frame_records(equity_curves.reset_index()) if not equity_curves.empty else [],
         "selectedSplit": split_name,
+        "equityCurves": _frame_records(equity_curves.reset_index()) if not equity_curves.empty else [],
+    }
+
+
+def get_overview_payload(split_name: str = "test") -> dict[str, Any]:
+    return {
+        **get_overview_summary_payload(split_name),
+        **get_overview_curves_payload(split_name),
     }
 
 
@@ -462,11 +538,12 @@ def get_factor_explorer_detail_payload(
 
     history = pd.DataFrame()
     if selected_symbol and selected_history_factor:
-        feature_panel = load_feature_panel()
-        history = feature_panel.loc[
-            feature_panel["ts_code"] == selected_symbol,
-            ["trade_date", selected_history_factor],
-        ].dropna().sort_values("trade_date").tail(240)
+        history = (
+            load_feature_history_for_symbol(selected_symbol, selected_history_factor)
+            .dropna(subset=["trade_date", selected_history_factor])
+            .sort_values("trade_date")
+            .tail(240)
+        )
     snapshot = build_latest_factor_snapshot(cross_section, symbol=selected_symbol, zh=lambda value: value)
 
     return {
@@ -498,17 +575,39 @@ def get_factor_explorer_payload(
 
 
 def get_model_backtest_payload(*, model_name: str = "lgbm", split_name: str = "test") -> dict[str, Any]:
-    portfolio = load_portfolio(model_name, split_name)
-    monthly_summary = build_monthly_summary(portfolio)
-    regime_diagnostics = normalize_regime_view(load_diagnostic_table(model_name, split_name, "regime"))
+    return {
+        **get_model_backtest_summary_payload(model_name=model_name, split_name=split_name),
+        **get_model_backtest_portfolio_payload(model_name=model_name, split_name=split_name),
+        **get_model_backtest_diagnostics_payload(model_name=model_name, split_name=split_name),
+    }
+
+
+def get_model_backtest_summary_payload(*, model_name: str = "lgbm", split_name: str = "test") -> dict[str, Any]:
     return {
         "modelName": model_name,
         "splitName": split_name,
         "metrics": _json_ready(load_metrics(model_name, split_name)),
         "stability": _json_ready(load_stability(model_name)),
-        "importance": _frame_records(load_feature_importance(model_name), limit=20),
+    }
+
+
+def get_model_backtest_portfolio_payload(*, model_name: str = "lgbm", split_name: str = "test") -> dict[str, Any]:
+    portfolio = load_portfolio(model_name, split_name)
+    monthly_summary = build_monthly_summary(portfolio)
+    return {
+        "modelName": model_name,
+        "splitName": split_name,
         "portfolio": _frame_records(portfolio),
         "monthlySummary": _frame_records(monthly_summary.tail(24)),
+    }
+
+
+def get_model_backtest_diagnostics_payload(*, model_name: str = "lgbm", split_name: str = "test") -> dict[str, Any]:
+    regime_diagnostics = normalize_regime_view(load_diagnostic_table(model_name, split_name, "regime"))
+    return {
+        "modelName": model_name,
+        "splitName": split_name,
+        "importance": _frame_records(load_feature_importance(model_name), limit=20),
         "yearlyDiagnostics": _frame_records(load_diagnostic_table(model_name, split_name, "yearly")),
         "regimeDiagnostics": _frame_records(regime_diagnostics),
     }
@@ -518,7 +617,8 @@ def get_candidates_summary_payload(
     *,
     model_name: str = "lgbm",
     split_name: str = "test",
-    top_n: int = 10,
+    top_n: int = 30,
+    page: int = 1,
     symbol: str | None = None,
 ) -> dict[str, Any]:
     candidate_snapshot = build_candidate_snapshot(model_name, split_name)
@@ -527,25 +627,60 @@ def get_candidates_summary_payload(
     latest_date = None
     symbol_options: list[str] = []
     selected_symbol = symbol or ""
+    total_count = 0
+    page_size = max(1, int(top_n))
+    normalized_page = max(1, int(page))
+    total_pages = 0
     if candidate_snapshot is not None and not candidate_snapshot.empty:
         latest_date = candidate_snapshot["trade_date"].iloc[0] if "trade_date" in candidate_snapshot.columns else None
-        latest_picks = candidate_snapshot.head(top_n).copy()
+        total_count = int(len(candidate_snapshot))
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        normalized_page = min(normalized_page, total_pages)
+        page_start = (normalized_page - 1) * page_size
+        page_end = page_start + page_size
+        latest_picks = candidate_snapshot.iloc[page_start:page_end].copy()
         symbol_options = candidate_snapshot["ts_code"].astype(str).tolist()
-        if not selected_symbol:
-            selected_symbol = str(latest_picks.iloc[0]["ts_code"]) if not latest_picks.empty else str(symbol_options[0])
 
-    selected = latest_picks.loc[latest_picks["ts_code"].astype(str) == selected_symbol].head(1) if not latest_picks.empty and selected_symbol else pd.DataFrame()
-    selected_record = selected.iloc[0].to_dict() if not selected.empty else {}
+    selected = candidate_snapshot.loc[candidate_snapshot["ts_code"].astype(str) == selected_symbol].head(1) if candidate_snapshot is not None and not candidate_snapshot.empty and selected_symbol else pd.DataFrame()
+    selected_record = _project_record_fields(selected.iloc[0].to_dict(), CANDIDATE_SUMMARY_FIELDS) if not selected.empty else {}
+    summary_columns = [column for column in CANDIDATE_SUMMARY_FIELDS if column in latest_picks.columns]
 
     return {
         "modelName": model_name,
         "splitName": split_name,
-        "topN": int(top_n),
+        "topN": page_size,
+        "page": normalized_page,
+        "pageSize": page_size,
+        "totalCount": total_count,
+        "totalPages": total_pages,
         "latestDate": _json_ready(latest_date),
         "selectedSymbol": selected_symbol,
         "symbolOptions": symbol_options,
-        "latestPicks": _frame_records(latest_picks),
+        "latestPicks": _frame_records(latest_picks[summary_columns].copy()) if summary_columns else [],
         "selectedRecord": _json_ready(selected_record),
+    }
+
+
+def get_candidate_detail_payload(
+    *,
+    model_name: str = "lgbm",
+    split_name: str = "test",
+    symbol: str | None = None,
+) -> dict[str, Any]:
+    candidate_snapshot = build_candidate_snapshot(model_name, split_name)
+    selected_symbol = str(symbol or "").strip()
+    if not selected_symbol and candidate_snapshot is not None and not candidate_snapshot.empty and "ts_code" in candidate_snapshot.columns:
+        selected_symbol = str(candidate_snapshot.iloc[0]["ts_code"])
+
+    selected = candidate_snapshot.loc[candidate_snapshot["ts_code"].astype(str) == selected_symbol].head(1) if selected_symbol and candidate_snapshot is not None and not candidate_snapshot.empty else pd.DataFrame()
+    selected_record = selected.iloc[0].to_dict() if not selected.empty else {}
+    field_rows = [{"field": key, "value": _json_ready(value)} for key, value in selected_record.items()]
+    return {
+        "modelName": model_name,
+        "splitName": split_name,
+        "selectedSymbol": selected_symbol,
+        "selectedRecord": _json_ready(selected_record),
+        "fieldRows": field_rows,
     }
 
 
@@ -555,13 +690,17 @@ def get_candidate_history_payload(
     split_name: str = "test",
     symbol: str | None = None,
 ) -> dict[str, Any]:
-    predictions = load_predictions(model_name, split_name)
     selected_symbol = symbol or ""
-    if not selected_symbol and not predictions.empty and "ts_code" in predictions.columns:
-        latest_picks = build_top_candidates_snapshot(predictions, top_n=1)
-        if not latest_picks.empty:
-            selected_symbol = str(latest_picks.iloc[0]["ts_code"])
-    score_history = build_candidate_score_history(predictions, symbol=selected_symbol).reset_index() if selected_symbol else pd.DataFrame()
+    if not selected_symbol:
+        candidate_snapshot = build_candidate_snapshot(model_name, split_name)
+        if not candidate_snapshot.empty and "ts_code" in candidate_snapshot.columns:
+            selected_symbol = str(candidate_snapshot.iloc[0]["ts_code"])
+
+    score_history = pd.DataFrame()
+    if selected_symbol:
+        predictions = load_prediction_history_for_symbol(model_name, split_name, selected_symbol)
+        if not predictions.empty:
+            score_history = build_candidate_score_history(predictions, symbol=selected_symbol).reset_index()
     return {
         "modelName": model_name,
         "splitName": split_name,
@@ -574,13 +713,15 @@ def get_candidates_payload(
     *,
     model_name: str = "lgbm",
     split_name: str = "test",
-    top_n: int = 10,
+    top_n: int = 30,
+    page: int = 1,
     symbol: str | None = None,
 ) -> dict[str, Any]:
     summary = get_candidates_summary_payload(
         model_name=model_name,
         split_name=split_name,
         top_n=top_n,
+        page=page,
         symbol=symbol,
     )
     history = get_candidate_history_payload(
@@ -780,7 +921,7 @@ def get_watchlist_payload(
         row = selected_row.iloc[0]
         detail = _json_ready(row.to_dict())
         reduce_plan = build_reduce_plan(row)
-        history_source = load_predictions("ensemble", "test")
+        history_source = load_prediction_history_for_symbol("ensemble", "test", selected_symbol)
         if not history_source.empty and {"ts_code", "trade_date", "score"}.issubset(history_source.columns):
             history = history_source.loc[
                 history_source["ts_code"] == selected_symbol,
@@ -854,9 +995,93 @@ def get_watchlist_summary_payload(
     keyword: str = "",
     scope: str = "all",
     sort_by: str = "inference_rank",
+    page: int = 1,
     symbol: str | None = None,
     include_realtime: bool = False,
 ) -> dict[str, Any]:
+    page_size = 30
+    if not include_realtime:
+        summary_records = load_watchlist_summary_records(
+            WATCHLIST_SUMMARY_RECORD_FIELDS,
+            keyword=keyword,
+            scope=scope,
+            sort_by=sort_by,
+            page=page,
+            page_size=page_size,
+        )
+        refresh_context_rows = load_watchlist_summary_records(
+            ["ts_code", "latest_bar_close"],
+            keyword="",
+            scope="all",
+            sort_by="inference_rank",
+        )
+        selected_symbol = str(symbol or (summary_records[0].get("ts_code", "") if summary_records else "") or "")
+        records_frame = pd.DataFrame(summary_records)
+        realtime_status = _empty_realtime_status()
+        if summary_records:
+            try:
+                latest_snapshot = get_realtime_quote_store().get_latest_snapshot()
+            except Exception as exc:  # pragma: no cover - defensive path
+                latest_snapshot = None
+                realtime_status = _decorate_realtime_status(
+                    {
+                        **realtime_status,
+                        "error_message": f"读取缓存快照失败：{exc}",
+                    }
+                )
+            if latest_snapshot is not None and not latest_snapshot.quotes.empty:
+                records_frame = merge_realtime_quotes(records_frame, latest_snapshot.quotes)
+                realtime_status = _decorate_realtime_status(
+                    {
+                        **dict(latest_snapshot.status),
+                        "available": True,
+                        "trade_date": latest_snapshot.trade_date,
+                        "snapshot_bucket": latest_snapshot.snapshot_bucket,
+                        "served_from": "database",
+                    }
+                )
+                summary_records = merge_realtime_quote_records(summary_records, latest_snapshot.quotes)
+        selected_record = {}
+        if selected_symbol:
+            selected_record = next(
+                (dict(record) for record in summary_records if str(record.get("ts_code", "") or "") == selected_symbol),
+                {},
+            )
+        if not selected_record and selected_symbol:
+            selected_record = load_watchlist_record(selected_symbol, WATCHLIST_SUMMARY_RECORD_FIELDS)
+
+        refresh_symbols: list[str] = []
+        refresh_previous_closes: dict[str, float] = {}
+        for row in refresh_context_rows:
+            symbol_value = str(row.get("ts_code", "") or "").strip()
+            if not symbol_value:
+                continue
+            refresh_symbols.append(symbol_value)
+            latest_bar_close = pd.to_numeric(row.get("latest_bar_close"), errors="coerce")
+            if pd.notna(latest_bar_close):
+                refresh_previous_closes[symbol_value] = float(latest_bar_close)
+
+        filtered_count = load_watchlist_filtered_count(keyword=keyword, scope=scope)
+        total_pages = max(1, (filtered_count + page_size - 1) // page_size) if filtered_count else 1
+        return {
+            "overview": _json_ready(load_watchlist_overview()),
+            "realtimeStatus": _json_ready(realtime_status),
+            "filters": {
+                "keyword": keyword,
+                "scope": scope,
+                "sortBy": sort_by,
+            },
+            "page": max(1, int(page)),
+            "pageSize": page_size,
+            "totalPages": total_pages,
+            "refreshSymbols": refresh_symbols,
+            "refreshPreviousCloses": _json_ready(refresh_previous_closes),
+            "selectedSymbol": selected_symbol,
+            "filteredCount": filtered_count,
+            "records": _json_ready(summary_records),
+            "selectedRecord": _json_ready(selected_record),
+        }
+
     watchlist_view, filtered, selected_symbol, realtime_status, refresh_symbols, refresh_previous_closes = _resolve_watchlist_view(
         keyword=keyword,
         scope=scope,
@@ -865,7 +1090,9 @@ def get_watchlist_summary_payload(
         include_realtime=include_realtime,
     )
     selected_row = filtered.loc[filtered["ts_code"].astype(str) == selected_symbol].head(1) if selected_symbol and not filtered.empty else pd.DataFrame()
-    selected_record = selected_row.iloc[0].to_dict() if not selected_row.empty else {}
+    selected_record = _project_record_fields(selected_row.iloc[0].to_dict(), WATCHLIST_SUMMARY_RECORD_FIELDS) if not selected_row.empty else {}
+    summary_columns = [column for column in WATCHLIST_SUMMARY_RECORD_FIELDS if column in filtered.columns]
+    summary_records = _frame_records(filtered[summary_columns].copy()) if summary_columns else []
 
     return {
         "overview": _watchlist_overview_payload(watchlist_view),
@@ -875,11 +1102,14 @@ def get_watchlist_summary_payload(
             "scope": scope,
             "sortBy": sort_by,
         },
+        "page": 1,
+        "pageSize": int(len(summary_records)),
+        "totalPages": 1,
         "refreshSymbols": refresh_symbols,
         "refreshPreviousCloses": _json_ready(refresh_previous_closes),
         "selectedSymbol": selected_symbol,
         "filteredCount": int(len(filtered)),
-        "records": _frame_records(filtered),
+        "records": summary_records,
         "selectedRecord": _json_ready(selected_record),
     }
 
@@ -892,14 +1122,56 @@ def get_watchlist_detail_payload(
     sort_by: str = "inference_rank",
     include_realtime: bool = False,
 ) -> dict[str, Any]:
-    _, filtered, selected_symbol, _, _, _ = _resolve_watchlist_view(
-        keyword=keyword,
-        scope=scope,
-        sort_by=sort_by,
-        symbol=symbol,
-        include_realtime=include_realtime,
-    )
-    selected_row = filtered.loc[filtered["ts_code"].astype(str) == selected_symbol].head(1) if selected_symbol and not filtered.empty else pd.DataFrame()
+    selected_symbol = str(symbol or "").strip()
+    selected_row = pd.DataFrame()
+    if selected_symbol:
+        selected_record = load_watchlist_record(selected_symbol)
+        if selected_record:
+            if include_realtime:
+                previous_close_lookup: dict[str, float] = {}
+                latest_bar_close = pd.to_numeric(selected_record.get("latest_bar_close"), errors="coerce")
+                if pd.notna(latest_bar_close):
+                    previous_close_lookup[selected_symbol] = float(latest_bar_close)
+                realtime_quotes, _ = fetch_managed_realtime_quotes(
+                    [selected_symbol],
+                    previous_close_lookup=previous_close_lookup,
+                    trade_date=pd.Timestamp.now(tz="Asia/Shanghai"),
+                )
+                if not realtime_quotes.empty:
+                    selected_record = merge_realtime_quote_records([selected_record], realtime_quotes)[0]
+            else:
+                try:
+                    latest_snapshot = get_realtime_quote_store().get_latest_snapshot()
+                except Exception:
+                    latest_snapshot = None
+                if latest_snapshot is not None and not latest_snapshot.quotes.empty:
+                    selected_quotes = latest_snapshot.quotes.loc[
+                        latest_snapshot.quotes["ts_code"].astype(str) == selected_symbol
+                    ].copy()
+                    if not selected_quotes.empty:
+                        selected_record = merge_realtime_quote_record(
+                            selected_record,
+                            dict(selected_quotes.iloc[0].to_dict()),
+                        )
+            selected_row = pd.DataFrame([selected_record])
+        else:
+            _, filtered, selected_symbol, _, _, _ = _resolve_watchlist_view(
+                keyword=keyword,
+                scope=scope,
+                sort_by=sort_by,
+                symbol=symbol,
+                include_realtime=include_realtime,
+            )
+            selected_row = filtered.loc[filtered["ts_code"].astype(str) == selected_symbol].head(1) if selected_symbol and not filtered.empty else pd.DataFrame()
+    else:
+        _, filtered, selected_symbol, _, _, _ = _resolve_watchlist_view(
+            keyword=keyword,
+            scope=scope,
+            sort_by=sort_by,
+            symbol=symbol,
+            include_realtime=include_realtime,
+        )
+        selected_row = filtered.loc[filtered["ts_code"].astype(str) == selected_symbol].head(1) if selected_symbol and not filtered.empty else pd.DataFrame()
 
     detail: dict[str, Any] = {}
     reduce_plan = pd.DataFrame()
@@ -911,7 +1183,7 @@ def get_watchlist_detail_payload(
         row = selected_row.iloc[0]
         detail = _json_ready(row.to_dict())
         reduce_plan = build_reduce_plan(row)
-        history_source = load_predictions("ensemble", "test")
+        history_source = load_prediction_history_for_symbol("ensemble", "test", selected_symbol)
         if not history_source.empty and {"ts_code", "trade_date", "score"}.issubset(history_source.columns):
             history = history_source.loc[
                 history_source["ts_code"] == selected_symbol,
@@ -940,6 +1212,7 @@ def get_watchlist_payload(
     keyword: str = "",
     scope: str = "all",
     sort_by: str = "inference_rank",
+    page: int = 1,
     symbol: str | None = None,
     include_realtime: bool = False,
 ) -> dict[str, Any]:
@@ -947,6 +1220,7 @@ def get_watchlist_payload(
         keyword=keyword,
         scope=scope,
         sort_by=sort_by,
+        page=page,
         symbol=symbol,
         include_realtime=include_realtime,
     )
@@ -1034,20 +1308,47 @@ def _build_ai_panel_detail_payload(
     }
 
 
+def _build_ai_review_summary_panel_payload(*, scope: str, selected_symbol: str | None) -> dict[str, Any]:
+    candidate_records = load_overlay_candidate_summary_records(scope, AI_REVIEW_SUMMARY_CANDIDATE_FIELDS)
+    candidates = pd.DataFrame(candidate_records)
+    symbol = str(selected_symbol or "").strip()
+    selected_record = load_overlay_candidate_record(scope, symbol, AI_REVIEW_SUMMARY_SELECTED_FIELDS) if symbol else {}
+    return {
+        "selectedSymbol": symbol,
+        "candidateCount": len(candidate_records),
+        "candidates": _json_ready(candidate_records),
+        "selectedRecord": _json_ready(selected_record),
+    }
+
+
+def _build_ai_review_detail_panel_payload(*, scope: str, selected_symbol: str | None) -> dict[str, Any]:
+    summary_panel = _build_ai_review_summary_panel_payload(scope=scope, selected_symbol=selected_symbol)
+    resolved_symbol = str(summary_panel.get("selectedSymbol", "") or "")
+    selected_record = load_overlay_candidate_record(scope, resolved_symbol) if resolved_symbol else {}
+    packet = load_overlay_inference_packet() if scope == "inference" else load_overlay_packet()
+    brief = load_overlay_inference_brief() if scope == "inference" else load_overlay_brief()
+    llm_bundle = load_overlay_llm_bundle(scope)
+    response_lookup = dict(llm_bundle.get("response_lookup", {}) or {})
+    field_rows = [{"field": key, "value": _json_ready(value)} for key, value in selected_record.items()]
+    return {
+        "selectedSymbol": resolved_symbol,
+        "selectedRecord": _json_ready(selected_record),
+        "fieldRows": field_rows,
+        "brief": brief,
+        "llmResponse": _json_ready(response_lookup.get(resolved_symbol, {})),
+        "responseSummary": str(llm_bundle.get("response_summary", "") or ""),
+        "packet": _json_ready(packet),
+    }
+
+
 def get_ai_review_summary_payload(
     *,
     inference_symbol: str | None = None,
     historical_symbol: str | None = None,
 ) -> dict[str, Any]:
     return {
-        "inference": _build_ai_panel_summary_payload(
-            candidates=load_overlay_inference_candidates(),
-            selected_symbol=inference_symbol,
-        ),
-        "historical": _build_ai_panel_summary_payload(
-            candidates=load_overlay_candidates(),
-            selected_symbol=historical_symbol,
-        ),
+        "inference": _build_ai_review_summary_panel_payload(scope="inference", selected_symbol=inference_symbol),
+        "historical": _build_ai_review_summary_panel_payload(scope="historical", selected_symbol=historical_symbol),
     }
 
 
@@ -1056,22 +1357,10 @@ def get_ai_review_detail_payload(
     scope: str,
     symbol: str | None = None,
 ) -> dict[str, Any]:
-    if scope == "inference":
-        return _build_ai_panel_detail_payload(
-            scope="inference",
-            candidates=load_overlay_inference_candidates(),
-            packet=load_overlay_inference_packet(),
-            brief=load_overlay_inference_brief(),
-            selected_symbol=symbol,
-        )
-
-    return _build_ai_panel_detail_payload(
-        scope="historical",
-        candidates=load_overlay_candidates(),
-        packet=load_overlay_packet(),
-        brief=load_overlay_brief(),
-        selected_symbol=symbol,
-    )
+    normalized_scope = "inference" if scope == "inference" else "historical"
+    detail_payload = _build_ai_review_detail_panel_payload(scope=normalized_scope, selected_symbol=symbol)
+    detail_payload.pop("packet", None)
+    return detail_payload
 
 
 def get_ai_review_payload(
@@ -1079,21 +1368,19 @@ def get_ai_review_payload(
     inference_symbol: str | None = None,
     historical_symbol: str | None = None,
 ) -> dict[str, Any]:
+    inference_summary = _build_ai_review_summary_panel_payload(scope="inference", selected_symbol=inference_symbol)
+    historical_summary = _build_ai_review_summary_panel_payload(scope="historical", selected_symbol=historical_symbol)
+    inference_detail = _build_ai_review_detail_panel_payload(
+        scope="inference",
+        selected_symbol=str(inference_summary.get("selectedSymbol", "") or ""),
+    )
+    historical_detail = _build_ai_review_detail_panel_payload(
+        scope="historical",
+        selected_symbol=str(historical_summary.get("selectedSymbol", "") or ""),
+    )
     return {
-        "inference": _build_ai_panel_payload(
-            scope="inference",
-            candidates=load_overlay_inference_candidates(),
-            packet=load_overlay_inference_packet(),
-            brief=load_overlay_inference_brief(),
-            selected_symbol=inference_symbol,
-        ),
-        "historical": _build_ai_panel_payload(
-            scope="historical",
-            candidates=load_overlay_candidates(),
-            packet=load_overlay_packet(),
-            brief=load_overlay_brief(),
-            selected_symbol=historical_symbol,
-        ),
+        "inference": {**inference_summary, **inference_detail},
+        "historical": {**historical_summary, **historical_detail},
     }
 
 
@@ -1108,13 +1395,14 @@ def _realtime_snapshot_label(snapshot_bucket: str, *, is_today: bool, available:
 
 
 def _latest_market_reference_date() -> pd.Timestamp | None:
-    daily_bar = load_daily_bar()
-    if daily_bar.empty or "trade_date" not in daily_bar.columns:
+    dataset_summary = load_dataset_summary()
+    latest_trade_date = dataset_summary.get("date_max")
+    if not latest_trade_date:
         return None
-    latest_trade_date = pd.to_datetime(daily_bar["trade_date"], errors="coerce").max()
-    if pd.isna(latest_trade_date):
+    normalized_trade_date = pd.Timestamp(latest_trade_date)
+    if pd.isna(normalized_trade_date):
         return None
-    return pd.Timestamp(latest_trade_date).normalize()
+    return normalized_trade_date.normalize()
 
 
 def _is_post_close_like_snapshot(

@@ -247,9 +247,9 @@ def _build_action_snapshot(
 
 def generate_action_memos(root: Path | None = None) -> list[Path]:
     resolved_root = root or project_root()
-    watchlist = load_watchlist_config(resolved_root, prefer_database=False).get("holdings", []) or []
+    watchlist = load_watchlist_config(resolved_root, prefer_database=True).get("holdings", []) or []
     if not watchlist:
-        logger.info("No holdings were found in config/watchlist.yaml.")
+        logger.info("No holdings were found in the database watchlist configuration.")
         return []
 
     data_source = resolve_data_source(resolved_root)

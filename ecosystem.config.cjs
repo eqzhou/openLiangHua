@@ -14,7 +14,7 @@ module.exports = {
       watch: false,
       time: true,
       env: {
-        API_PORT: "8001",
+        API_PORT: "8989",
       },
       out_file: path.join(logDir, "research_api.out.log"),
       error_file: path.join(logDir, "research_api.err.log"),

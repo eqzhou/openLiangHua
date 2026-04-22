@@ -36,8 +36,9 @@ class DashboardFacadeTests(unittest.TestCase):
                 "targetSource": "akshare",
                 "tokenConfigured": True,
                 "dailyBar": {"latestTradeDate": "2026-04-16"},
-                "featurePanel": {"latestTradeDate": "2026-04-16"},
-                "labelPanel": {"latestTradeDate": "2026-04-16"},
+                "researchPanel": {"latestTradeDate": "2026-04-16"},
+                "legacyFeatureView": {"latestTradeDate": "2026-04-16"},
+                "legacyLabelView": {"latestTradeDate": "2026-04-16"},
                 "scripts": {"incremental": "scripts/refresh_daily_bar_tushare.ps1", "fullRefresh": "scripts/refresh_full_pipeline_tushare.ps1"},
             },
         ):
@@ -96,7 +97,12 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertIn("comparison", payload)
 
     def test_shell_payload_exposes_sidebar_contract(self) -> None:
-        payload = get_shell_payload()
+        with (
+            patch("src.app.facades.dashboard_facade.get_experiment_config_payload", return_value={"label_col": "ret_t1_t10", "top_n": 10}),
+            patch("src.app.facades.dashboard_facade.load_watchlist_config", return_value={"holdings": [{"ts_code": "000001.SZ"}], "focus_pool": []}),
+            patch("src.app.facades.dashboard_facade.get_service_payload", return_value={"effective_state": "running"}),
+        ):
+            payload = get_shell_payload()
 
         self.assertIn("bootstrap", payload)
         self.assertIn("experimentConfig", payload)
@@ -105,7 +111,20 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertIn("configSummaryText", payload)
 
     def test_home_payload_exposes_operator_sections(self) -> None:
-        payload = get_home_payload()
+        with (
+            patch(
+                "src.app.facades.dashboard_facade._get_home_payload_cached",
+                return_value={
+                    "service": {"effective_state": "running"},
+                    "overview": {"selectedSplit": "test"},
+                    "watchlist": {"records": []},
+                    "candidates": {"records": []},
+                    "aiReview": {"shortlistMarkdown": "test"},
+                    "alerts": [],
+                },
+            ),
+        ):
+            payload = get_home_payload()
 
         self.assertIn("service", payload)
         self.assertIn("overview", payload)
@@ -155,7 +174,7 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertEqual(payload["modelName"], "ensemble")
         self.assertEqual(payload["latestDate"], "2026-04-03T00:00:00")
         self.assertEqual(len(payload["latestPicks"]), 1)
-        self.assertEqual(payload["selectedSymbol"], "000001.SZ")
+        self.assertEqual(payload["selectedSymbol"], "")
 
     def test_candidate_history_payload_returns_selected_symbol_history(self) -> None:
         predictions = pd.DataFrame(
@@ -165,28 +184,33 @@ class DashboardFacadeTests(unittest.TestCase):
             ]
         )
 
-        with patch("src.app.facades.dashboard_facade.load_predictions", return_value=predictions):
+        with patch("src.app.facades.dashboard_facade.load_prediction_history_for_symbol", return_value=predictions):
             payload = get_candidate_history_payload(model_name="ensemble", split_name="test", symbol="000001.SZ")
 
         self.assertEqual(payload["selectedSymbol"], "000001.SZ")
         self.assertEqual(len(payload["scoreHistory"]), 2)
 
     def test_ai_review_summary_payload_keeps_candidates_and_selected_record(self) -> None:
-        inference_candidates = pd.DataFrame(
-            [
-                {"ts_code": "000001.SZ", "name": "示例推理", "trade_date": "2026-04-03", "final_score": 0.9},
-                {"ts_code": "000002.SZ", "name": "备选推理", "trade_date": "2026-04-03", "final_score": 0.8},
-            ]
-        )
-        historical_candidates = pd.DataFrame(
-            [
-                {"ts_code": "300001.SZ", "name": "示例验证", "trade_date": "2026-04-02", "final_score": 0.7},
-            ]
-        )
-
         with (
-            patch("src.app.facades.dashboard_facade.load_overlay_inference_candidates", return_value=inference_candidates),
-            patch("src.app.facades.dashboard_facade.load_overlay_candidates", return_value=historical_candidates),
+            patch(
+                "src.app.facades.dashboard_facade.load_overlay_candidate_summary_records",
+                side_effect=[
+                    [
+                        {"ts_code": "000001.SZ", "name": "示例推理", "trade_date": "2026-04-03", "final_score": 0.9},
+                        {"ts_code": "000002.SZ", "name": "备选推理", "trade_date": "2026-04-03", "final_score": 0.8},
+                    ],
+                    [
+                        {"ts_code": "300001.SZ", "name": "示例验证", "trade_date": "2026-04-02", "final_score": 0.7},
+                    ],
+                ],
+            ),
+            patch(
+                "src.app.facades.dashboard_facade.load_overlay_candidate_record",
+                side_effect=[
+                    {"ts_code": "000002.SZ", "name": "备选推理", "trade_date": "2026-04-03", "final_score": 0.8},
+                    {"ts_code": "300001.SZ", "name": "示例验证", "trade_date": "2026-04-02", "final_score": 0.7},
+                ],
+            ),
         ):
             payload = get_ai_review_summary_payload(inference_symbol="000002.SZ")
 
@@ -196,11 +220,15 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertNotIn("brief", payload["inference"])
 
     def test_ai_review_summary_payload_gracefully_handles_candidates_without_symbol_column(self) -> None:
-        inference_candidates = pd.DataFrame([{"name": "无代码候选", "final_score": 0.4}])
-
         with (
-            patch("src.app.facades.dashboard_facade.load_overlay_inference_candidates", return_value=inference_candidates),
-            patch("src.app.facades.dashboard_facade.load_overlay_candidates", return_value=pd.DataFrame()),
+            patch(
+                "src.app.facades.dashboard_facade.load_overlay_candidate_summary_records",
+                side_effect=[
+                    [{"name": "无代码候选", "final_score": 0.4}],
+                    [],
+                ],
+            ),
+            patch("src.app.facades.dashboard_facade.load_overlay_candidate_record", return_value={}),
         ):
             payload = get_ai_review_summary_payload()
 
@@ -209,20 +237,22 @@ class DashboardFacadeTests(unittest.TestCase):
         self.assertEqual(payload["inference"]["candidateCount"], 1)
 
     def test_ai_review_detail_payload_returns_selected_record_and_detail_fields(self) -> None:
-        candidates = pd.DataFrame(
-            [
-                {
+        with (
+            patch(
+                "src.app.facades.dashboard_facade.load_overlay_candidate_summary_records",
+                return_value=[{"ts_code": "000001.SZ", "name": "示例推理", "trade_date": "2026-04-03", "final_score": 0.9}],
+            ),
+            patch(
+                "src.app.facades.dashboard_facade.load_overlay_candidate_record",
+                return_value={
                     "ts_code": "000001.SZ",
                     "name": "示例推理",
                     "trade_date": "2026-04-03",
                     "final_score": 0.9,
                     "bull_points": "强势;放量",
                     "risk_points": "回撤;追高",
-                }
-            ]
-        )
-        with (
-            patch("src.app.facades.dashboard_facade.load_overlay_inference_candidates", return_value=candidates),
+                },
+            ),
             patch("src.app.facades.dashboard_facade.load_overlay_inference_brief", return_value="测试纪要"),
             patch(
                 "src.app.facades.dashboard_facade.load_overlay_llm_bundle",
@@ -289,7 +319,7 @@ class DashboardFacadeTests(unittest.TestCase):
 
         with (
             patch("src.app.facades.dashboard_facade.build_factor_explorer_snapshot", return_value=factor_snapshot),
-            patch("src.app.facades.dashboard_facade.load_feature_panel", return_value=feature_panel),
+            patch("src.app.facades.dashboard_facade.load_feature_history_for_symbol", return_value=feature_panel),
         ):
             payload = get_factor_explorer_detail_payload(factor_name="mom_20", history_factor="mom_20", symbol="000001.SZ")
 
@@ -334,15 +364,12 @@ class DashboardFacadeTests(unittest.TestCase):
             "error_message": "",
             "fetched_at": "2026-04-03T15:05:00+08:00",
         }
-        daily_bar = pd.DataFrame(
-            [
-                {"trade_date": "2026-04-03", "ts_code": "000001.SZ", "close": 10.0},
-            ]
-        )
-
         with (
             patch("src.app.facades.dashboard_facade.get_realtime_quote_store", return_value=fake_store),
-            patch("src.app.facades.dashboard_facade.load_daily_bar", return_value=daily_bar),
+            patch(
+                "src.app.facades.dashboard_facade.load_dataset_summary",
+                return_value={"date_max": "2026-04-03"},
+            ),
             patch("src.app.facades.dashboard_facade.pd.Timestamp.now", return_value=pd.Timestamp("2026-04-05 10:00:00+08:00")),
         ):
             payload = get_service_payload()
@@ -448,7 +475,8 @@ class DashboardFacadeTests(unittest.TestCase):
         with (
             patch("src.app.facades.dashboard_facade.build_watchlist_base_frame", return_value=base_frame),
             patch("src.app.facades.dashboard_facade.filtered_watchlist_view", side_effect=lambda frame, **_: frame.reset_index(drop=True)),
-            patch("src.app.facades.dashboard_facade.load_predictions", return_value=pd.DataFrame()),
+            patch("src.app.facades.dashboard_facade.load_watchlist_record", return_value={}),
+            patch("src.app.facades.dashboard_facade.load_prediction_history_for_symbol", return_value=pd.DataFrame()),
             patch("src.app.facades.dashboard_facade.load_latest_symbol_markdown", return_value={}),
         ):
             payload = get_watchlist_detail_payload(symbol="000001.SZ")
@@ -512,7 +540,44 @@ class DashboardFacadeTests(unittest.TestCase):
             patch("src.app.facades.dashboard_facade.build_watchlist_base_frame", return_value=base_frame),
             patch("src.app.facades.dashboard_facade.filtered_watchlist_view", side_effect=lambda frame, **_: frame.reset_index(drop=True)),
             patch("src.app.facades.dashboard_facade.build_reduce_plan", return_value=pd.DataFrame()),
-            patch("src.app.facades.dashboard_facade.load_predictions", return_value=pd.DataFrame(columns=["ts_code", "trade_date", "score"])),
+            patch(
+                "src.app.facades.dashboard_facade.load_watchlist_summary_records",
+                side_effect=[
+                    [
+                        {
+                            "ts_code": "000001.SZ",
+                            "name": "示例股票",
+                            "industry": "银行",
+                            "entry_group": "持仓",
+                            "mark_price": 10.0,
+                            "latest_bar_close": 9.8,
+                            "market_value": 10000.0,
+                            "unrealized_pnl": 200.0,
+                            "unrealized_pnl_pct": 0.02,
+                            "is_overlay_selected": False,
+                            "is_inference_overlay_selected": False,
+                        }
+                    ],
+                    [
+                        {
+                            "ts_code": "000001.SZ",
+                            "latest_bar_close": 9.8,
+                        }
+                    ],
+                ],
+            ),
+            patch(
+                "src.app.facades.dashboard_facade.load_watchlist_overview",
+                return_value={
+                    "totalCount": 1,
+                    "overlayCount": 0,
+                    "inferenceOverlayCount": 0,
+                    "marketValue": 10000.0,
+                    "unrealizedPnl": 200.0,
+                },
+            ),
+            patch("src.app.facades.dashboard_facade.load_watchlist_record", return_value={}),
+            patch("src.app.facades.dashboard_facade.load_prediction_history_for_symbol", return_value=pd.DataFrame(columns=["ts_code", "trade_date", "score"])),
             patch("src.app.facades.dashboard_facade.load_latest_symbol_markdown", return_value={}),
             patch("src.app.facades.dashboard_facade.get_realtime_quote_store", return_value=fake_store),
         ):
