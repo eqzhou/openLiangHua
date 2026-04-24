@@ -3,19 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { apiGet } from '../api/client'
-import { Badge } from '../components/Badge'
-import { ControlField } from '../components/ControlField'
-import { ControlGrid } from '../components/ControlGrid'
-import { ContextStrip } from '../components/ContextStrip'
 import { DataTable } from '../components/DataTable'
 import { EntityCell } from '../components/EntityCell'
-import { MetricCard } from '../components/MetricCard'
-import { PageFilterBar } from '../components/PageFilterBar'
-import { Panel } from '../components/Panel'
-import { QueryNotice } from '../components/QueryNotice'
-import { SectionBlock } from '../components/SectionBlock'
-import { SpotlightCard } from '../components/SpotlightCard'
-import { WorkspaceHero } from '../components/WorkspaceHero'
 import { candidatesPageClient, candidatesSummaryClient } from '../facades/dashboardPageClient'
 import { usePageSearchState } from '../facades/usePageSearchState'
 import { formatDate } from '../lib/format'
@@ -72,111 +61,88 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
     [],
   )
 
-  const candidatesContextItems = useMemo(
-    () => [
-      { label: '信号日期', value: summaryQuery.data?.latestDate ?? '-' },
-      { label: '结果模型', value: String(summaryQuery.data?.modelName ?? '-').toUpperCase(), tone: 'brand' as const },
-      { label: '样本分段', value: String(summaryQuery.data?.splitName ?? '-').toUpperCase() },
-      {
-        label: '候选总数',
-        value: summaryQuery.data?.totalCount ?? 0,
-        helper: `第 ${summaryQuery.data?.page ?? params.page} / ${summaryQuery.data?.totalPages ?? 1} 页`,
-      },
-      { label: '每页数量', value: summaryQuery.data?.pageSize ?? params.topN },
-    ],
-    [params.page, params.topN, summaryQuery.data?.latestDate, summaryQuery.data?.modelName, summaryQuery.data?.page, summaryQuery.data?.pageSize, summaryQuery.data?.splitName, summaryQuery.data?.totalCount, summaryQuery.data?.totalPages],
-  )
-
-  const candidatesHeroBadges = (
-    <>
-      <Badge tone="brand">{String(summaryQuery.data?.modelName ?? params.model).toUpperCase()}</Badge>
-      <Badge tone="default">{String(summaryQuery.data?.splitName ?? params.split).toUpperCase()}</Badge>
-      <Badge tone={positiveCount > 0 ? 'good' : 'warn'}>{`${positiveCount} 只正收益样本`}</Badge>
-      <Badge tone="brand">{`第 ${summaryQuery.data?.page ?? params.page} / ${summaryQuery.data?.totalPages ?? 1} 页`}</Badge>
-    </>
-  )
-
   const openDetail = (symbol: string) => {
     if (!symbol) {
       return
     }
-    navigate({ pathname: buildCandidatesPath(symbol), search: location.search })
+    navigate(buildCandidatesPath(symbol) + location.search)
   }
 
   return (
-    <div className="page-stack">
-      <WorkspaceHero title="候选股" badges={candidatesHeroBadges} />
+    <div className="flex-1 flex flex-col overflow-hidden text-erp">
+      {/* Local Toolbar */}
+      <div className="h-10 bg-white erp-border-b flex items-center px-3 gap-3 shrink-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
+        <span className="font-bold text-gray-700 mr-2 flex items-center gap-2 shrink-0">
+          <i className="ph-fill ph-users-three text-erp-primary"></i> 
+          候选池分析
+        </span>
+        <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 text-erp-sm border border-blue-200 rounded shrink-0">
+          {String(summaryQuery.data?.modelName ?? params.model).toUpperCase()}
+        </span>
+        <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-erp-sm border border-gray-200 rounded shrink-0">
+          {String(summaryQuery.data?.splitName ?? params.split).toUpperCase()}
+        </span>
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+        
+        {/* Quick Filters in Toolbar */}
+        <div className="flex items-center gap-2 text-erp-sm shrink-0">
+          <span className="text-gray-500">模型:</span>
+          <select 
+            className="border border-gray-300 rounded px-1 py-0.5 outline-none focus:border-erp-primary bg-white"
+            value={params.model} 
+            onChange={(event) => updateParams({ model: event.target.value, page: 1 })}
+          >
+            {(bootstrap?.modelNames ?? ['ridge', 'lgbm', 'ensemble']).map((item) => (
+              <option key={item} value={item}>{bootstrap?.modelLabels?.[item] ?? item}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2 text-erp-sm shrink-0">
+          <span className="text-gray-500">分段:</span>
+          <select 
+            className="border border-gray-300 rounded px-1 py-0.5 outline-none focus:border-erp-primary bg-white"
+            value={params.split} 
+            onChange={(event) => updateParams({ split: event.target.value, page: 1 })}
+          >
+            {(bootstrap?.splitNames ?? ['valid', 'test']).map((item) => (
+              <option key={item} value={item}>{bootstrap?.splitLabels?.[item] ?? item}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2 text-erp-sm shrink-0">
+          <span className="text-gray-500">数量:</span>
+          <input 
+            type="number" min={10} max={100}
+            className="border border-gray-300 rounded px-1 py-0.5 outline-none focus:border-erp-primary w-16"
+            value={params.topN} 
+            onChange={(event) => updateParams({ topN: Number(event.target.value) || 30, page: 1 })} 
+          />
+        </div>
 
-      <div className="metric-grid metric-grid--four">
-        <MetricCard label="候选池总数" value={summaryQuery.data?.totalCount ?? 0} />
-        <MetricCard label="当前页数量" value={latestPicks.length} />
-        <MetricCard label="正收益样本" value={positiveCount} tone={positiveCount > 0 ? 'good' : 'default'} />
-        <MetricCard label="当前模型" value={String(summaryQuery.data?.modelName ?? params.model).toUpperCase()} />
+        <button className="toolbar-btn ml-2 shrink-0" onClick={() => copyShareablePageLink(location.pathname, location.search)}>
+          <i className="ph ph-link"></i> 复制视图
+        </button>
+        
+        <div className="ml-auto flex items-center gap-4 text-erp-sm shrink-0">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">信号日期:</span> 
+            <span className="font-bold font-mono">{summaryQuery.data?.latestDate ? formatDate(summaryQuery.data.latestDate) : '-'}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">总候选数:</span> 
+            <span className="font-bold font-mono">{summaryQuery.data?.totalCount ?? 0}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">正收益样本:</span> 
+            <span className={`font-bold font-mono ${positiveCount > 0 ? 'text-erp-success' : ''}`}>
+              {positiveCount}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <Panel title="筛选" subtitle={summaryQuery.data?.latestDate ? `${String(summaryQuery.data.modelName).toUpperCase()} / ${String(summaryQuery.data.splitName).toUpperCase()} / ${formatDate(summaryQuery.data.latestDate)}` : undefined} tone="warm" className="panel--summary-surface">
-        <QueryNotice isLoading={summaryQuery.isLoading} error={summaryQuery.error} />
-
-        <SectionBlock title="列表模式" tone="emphasis">
-          <SpotlightCard
-            title="列表优先"
-            meta="像 ERP 一样先查列表，再进入详情页"
-            subtitle="不会首屏自动拉单票详情和历史曲线。"
-            metrics={[
-              { label: '候选总数', value: summaryQuery.data?.totalCount ?? 0 },
-              { label: '当前页', value: summaryQuery.data?.page ?? params.page },
-              { label: '总页数', value: summaryQuery.data?.totalPages ?? 1 },
-              { label: '每页数量', value: summaryQuery.data?.pageSize ?? params.topN },
-            ]}
-          />
-        </SectionBlock>
-
-        <ContextStrip items={candidatesContextItems} />
-
-        <PageFilterBar title="切换候选池视角">
-          <ControlGrid variant="triple">
-            <ControlField label="结果模型">
-              <select value={params.model} onChange={(event) => updateParams({ model: event.target.value, page: 1 })}>
-                {(bootstrap?.modelNames ?? ['ridge', 'lgbm', 'ensemble']).map((item) => (
-                  <option key={item} value={item}>
-                    {bootstrap?.modelLabels?.[item] ?? item}
-                  </option>
-                ))}
-              </select>
-            </ControlField>
-            <ControlField label="数据集">
-              <select value={params.split} onChange={(event) => updateParams({ split: event.target.value, page: 1 })}>
-                {(bootstrap?.splitNames ?? ['valid', 'test']).map((item) => (
-                  <option key={item} value={item}>
-                    {bootstrap?.splitLabels?.[item] ?? item}
-                  </option>
-                ))}
-              </select>
-            </ControlField>
-            <ControlField label="每页数量">
-              <input type="number" min={10} max={100} value={params.topN} onChange={(event) => updateParams({ topN: Number(event.target.value) || 30, page: 1 })} />
-            </ControlField>
-          </ControlGrid>
-          <div className="inline-actions inline-actions--compact">
-            <button type="button" className="button button--ghost" disabled={(summaryQuery.data?.page ?? params.page) <= 1} onClick={() => updateParams({ page: Math.max(1, (summaryQuery.data?.page ?? params.page) - 1) })}>
-              上一页
-            </button>
-            <button
-              type="button"
-              className="button button--ghost"
-              disabled={(summaryQuery.data?.page ?? params.page) >= (summaryQuery.data?.totalPages ?? 1)}
-              onClick={() => updateParams({ page: Math.min(summaryQuery.data?.totalPages ?? 1, (summaryQuery.data?.page ?? params.page) + 1) })}
-            >
-              下一页
-            </button>
-            <button type="button" className="button button--ghost" onClick={() => copyShareablePageLink(location.pathname, location.search)}>
-              复制当前视图
-            </button>
-          </div>
-        </PageFilterBar>
-      </Panel>
-
-      <Panel title="列表" tone="calm" className="panel--table-surface">
+      {/* Main Grid Area */}
+      <div className="flex-1 bg-white flex flex-col relative overflow-hidden">
         <DataTable
           rows={latestPicks}
           columns={PICKS_COLUMNS}
@@ -192,7 +158,31 @@ export function CandidatesPage({ bootstrap }: CandidatesPageProps) {
           rowTitle="点击进入详情"
           cellRenderers={candidateCellRenderers}
         />
-      </Panel>
+      </div>
+
+      {/* Pager Status Bar */}
+      <div className="h-8 erp-border-t bg-gray-50 flex items-center px-2 justify-between text-gray-500 text-erp-sm shrink-0">
+        <div className="flex items-center gap-4">
+          <span>共 {summaryQuery.data?.totalCount ?? 0} 条记录</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button 
+            className="toolbar-btn" 
+            disabled={(summaryQuery.data?.page ?? params.page) <= 1} 
+            onClick={() => updateParams({ page: Math.max(1, (summaryQuery.data?.page ?? params.page) - 1) })}
+          >
+            <i className="ph ph-caret-left"></i> 上一页
+          </button>
+          <span>第 {summaryQuery.data?.page ?? params.page} / {summaryQuery.data?.totalPages ?? 1} 页</span>
+          <button 
+            className="toolbar-btn"
+            disabled={(summaryQuery.data?.page ?? params.page) >= (summaryQuery.data?.totalPages ?? 1)}
+            onClick={() => updateParams({ page: Math.min(summaryQuery.data?.totalPages ?? 1, (summaryQuery.data?.page ?? params.page) + 1) })}
+          >
+            下一页 <i className="ph ph-caret-right"></i>
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

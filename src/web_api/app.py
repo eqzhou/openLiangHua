@@ -6,9 +6,10 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from src.app.facades.dashboard_facade import (
+from src.app.facades import (
     LABEL_OPTIONS,
     MODEL_NAMES,
     SPLITS,
@@ -83,6 +84,33 @@ def _build_auth_payload(user: AuthenticatedUser | None) -> dict[str, Any]:
 settings = get_api_settings()
 app = FastAPI(title="OpenLianghua Research API", version="0.1.0")
 logger = logging.getLogger("openlianghua.web_api")
+
+class ApiError(Exception):
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        self.message = message
+
+@app.exception_handler(ApiError)
+async def api_error_handler(request: Request, exc: ApiError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.message}
+    )
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": str(exc)}
+    )
+
+@app.exception_handler(KeyError)
+async def key_error_handler(request: Request, exc: KeyError):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": f"Resource not found: {str(exc)}"}
+    )
+
 LEGACY_AGGREGATE_PATHS = frozenset(
     {
         "/api/home",
@@ -245,10 +273,7 @@ def post_action(
     action_name: str,
     _: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
-    try:
-        return run_named_action(action_name)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"Unknown action: {action_name}") from exc
+    return run_named_action(action_name)
 
 
 @app.post("/api/cache/clear")
@@ -277,10 +302,7 @@ def post_tushare_refresh(
     payload: DataRefreshRequest,
     _: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
-    try:
-        return run_tushare_incremental_refresh_payload(target_source=payload.target_source, end_date=payload.end_date)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return run_tushare_incremental_refresh_payload(target_source=payload.target_source, end_date=payload.end_date)
 
 
 @app.post("/api/data-management/full-refresh")
@@ -288,10 +310,7 @@ def post_tushare_full_refresh(
     payload: DataRefreshRequest,
     _: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
-    try:
-        return run_tushare_full_refresh_payload(target_source=payload.target_source, end_date=payload.end_date)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return run_tushare_full_refresh_payload(target_source=payload.target_source, end_date=payload.end_date)
 
 
 @app.get("/api/overview")

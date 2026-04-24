@@ -2,23 +2,10 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '../api/client'
-import { Badge } from '../components/Badge'
-import { ContextStrip } from '../components/ContextStrip'
-import { ControlField } from '../components/ControlField'
-import { ControlGrid } from '../components/ControlGrid'
 import { DataTable } from '../components/DataTable'
 import { EntityCell } from '../components/EntityCell'
 import { LineChartCard } from '../components/LineChartCard'
-import { MetricCard } from '../components/MetricCard'
-import { PageFilterBar } from '../components/PageFilterBar'
-import { Panel } from '../components/Panel'
-import { PropertyGrid } from '../components/PropertyGrid'
 import { QueryNotice } from '../components/QueryNotice'
-import { SectionBlock } from '../components/SectionBlock'
-import { SegmentedControl } from '../components/SegmentedControl'
-import { SpotlightCard } from '../components/SpotlightCard'
-import { SupportPanel } from '../components/SupportPanel'
-import { WorkspaceHero } from '../components/WorkspaceHero'
 import {
   factorExplorerDetailClient,
   factorExplorerPageClient,
@@ -126,217 +113,192 @@ export function FactorExplorerPage() {
     [summaryQuery.data?.selectedFactor, params.factor, topRank?.ts_code],
   )
 
-  const factorContextItems = useMemo(
-    () => [
-      { label: '最新截面', value: summaryQuery.data?.latestDate ?? '-' },
-      { label: '当前因子', value: summaryQuery.data?.selectedFactor ?? params.factor, tone: 'brand' as const },
-      { label: '历史序列', value: summaryQuery.data?.selectedHistoryFactor ?? params.historyFactor },
-      { label: '当前股票', value: summaryQuery.data?.selectedSymbol ?? params.symbol },
-      {
-        label: '头部股票',
-        value: topRank ? `${formatValue(topRank.ts_code)} / ${formatValue(topRank.name)}` : '-',
-        helper: topRank ? `因子值 ${formatValue(topRank.close_to_ma_20)}` : '',
-      },
-    ],
-    [
-      summaryQuery.data?.latestDate,
-      summaryQuery.data?.selectedFactor,
-      summaryQuery.data?.selectedHistoryFactor,
-      summaryQuery.data?.selectedSymbol,
-      params.factor,
-      params.historyFactor,
-      params.symbol,
-      topRank,
-    ],
-  )
-
-  const factorHeroBadges = (
-    <>
-      <Badge tone={summaryQuery.data?.available ? 'good' : 'warn'}>{summaryQuery.data?.available ? '因子可用' : '因子缺失'}</Badge>
-      <Badge tone="brand">{String(summaryQuery.data?.selectedFactor ?? params.factor)}</Badge>
-      <Badge tone="default">{String(summaryQuery.data?.selectedHistoryFactor ?? params.historyFactor)}</Badge>
-      <Badge tone={topRank ? 'good' : 'default'}>{topRank ? `头部 ${String(topRank.name ?? topRank.ts_code ?? '-')}` : '暂无头部股票'}</Badge>
-    </>
-  )
-
   return (
-    <div className="page-stack">
-      <WorkspaceHero
-        title="因子探索"
-        badges={factorHeroBadges}
-      />
+    <div className="flex-1 flex flex-col overflow-hidden text-erp">
+      {/* Local Toolbar */}
+      <div className="h-10 bg-white erp-border-b flex items-center px-3 gap-3 shrink-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
+        <span className="font-bold text-gray-700 mr-2 flex items-center gap-2 shrink-0">
+          <i className="ph-fill ph-function text-erp-primary"></i> 
+          因子探索器
+        </span>
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+        
+        {/* Quick Filters in Toolbar */}
+        <div className="flex items-center gap-2 text-erp-sm shrink-0">
+          <span className="text-gray-500">因子:</span>
+          <select 
+            className="border border-gray-300 rounded px-1 py-0.5 outline-none focus:border-erp-primary bg-white font-medium max-w-[200px]"
+            value={summaryQuery.data?.selectedFactor ?? params.factor} 
+            onChange={(event) => updateParams({ factor: event.target.value })}
+          >
+            {factorOptions.map((option) => (
+              <option key={option.key} value={option.key}>{option.label}</option>
+            ))}
+          </select>
+        </div>
 
-      <div className="metric-grid metric-grid--four">
-        <MetricCard label="可用因子数" value={factorOptions.length} />
-        <MetricCard label="样本股票数" value={summaryQuery.data?.symbolOptions?.length ?? 0} />
-        <MetricCard label="排名条数" value={ranking.length} />
-        <MetricCard label="缺失率记录数" value={missingRates.length} tone={missingRates.length ? 'warn' : 'default'} />
+        <div className="flex items-center gap-2 text-erp-sm shrink-0">
+          <span className="text-gray-500">股票:</span>
+          <select 
+            className="border border-gray-300 rounded px-1 py-0.5 outline-none focus:border-erp-primary bg-white font-medium"
+            value={summaryQuery.data?.selectedSymbol ?? params.symbol} 
+            onChange={(event) => updateParams({ symbol: event.target.value })}
+          >
+            {(summaryQuery.data?.symbolOptions ?? []).map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+
+        <div className="flex items-center gap-2 text-erp-sm shrink-0">
+           <span className={`font-bold ${summaryQuery.data?.available ? 'text-erp-success' : 'text-erp-danger'}`}>
+             {summaryQuery.data?.available ? 'DATA_READY' : 'DATA_MISSING'}
+           </span>
+           <span className="text-gray-400">|</span>
+           <span className="text-gray-500">截面:</span>
+           <span className="font-bold font-mono">{summaryQuery.data?.latestDate ? formatDate(summaryQuery.data.latestDate) : '-'}</span>
+        </div>
+        
+        <div className="ml-auto flex items-center gap-4 text-erp-sm shrink-0">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">可用因子:</span> 
+            <span className="font-bold font-mono">{factorOptions.length}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">最高缺失:</span> 
+            <span className="font-bold font-mono text-erp-warning">
+               {worstMissing ? `${worstMissing.feature} (${formatValue(worstMissing.missing_rate)})` : '0%'}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <Panel title="筛选" subtitle={summaryQuery.data?.latestDate ? `最新截面 ${formatDate(summaryQuery.data.latestDate)}` : undefined} tone="warm" className="panel--summary-surface">
+      {/* Main Content Area: High Density Grid & Charts */}
+      <div className="flex-1 bg-white p-8 overflow-y-auto flex flex-col gap-12">
         <QueryNotice isLoading={summaryQuery.isLoading} error={summaryQuery.error ?? detailQuery.error} />
 
-        <SectionBlock title="概览" tone="emphasis">
-          {selectedFactorDescription ? <p className="helper-text">{selectedFactorDescription}</p> : null}
-          <SpotlightCard
-            title={String((summaryQuery.data?.selectedFactor ?? params.factor) || '未选择因子')}
-            meta={summaryQuery.data?.latestDate ? `最新截面 ${formatDate(summaryQuery.data.latestDate)}` : '当前因子'}
-            badges={[
-              { label: summaryQuery.data?.available ? '因子可用' : '因子缺失', tone: summaryQuery.data?.available ? 'good' : 'warn' },
-              { label: topRank ? `头部股票 ${formatValue(topRank.name)}` : '暂无头部股票', tone: topRank ? 'good' : 'default' },
-            ]}
-            metrics={[
-              { label: '可用因子数', value: factorOptions.length },
-              { label: '股票样本数', value: summaryQuery.data?.symbolOptions?.length ?? 0 },
-              { label: '当前排名条数', value: ranking.length },
-              { label: '缺失率记录数', value: missingRates.length, tone: missingRates.length ? 'warn' : 'default' },
-            ]}
-          />
-        </SectionBlock>
+        {/* Top Feature Summary Bar */}
+        <div className="flex items-center gap-16 shrink-0 border-b erp-border pb-8">
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">当前聚焦标的</span>
+            <span className="text-3xl font-bold text-erp-primary leading-none">{String(selectedRecord.name ?? summaryQuery.data?.selectedSymbol ?? '未选择')}</span>
+            <span className="text-xs font-mono text-gray-400 mt-2 uppercase">{String(summaryQuery.data?.selectedSymbol ?? '-')}</span>
+          </div>
+          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="grid grid-cols-4 gap-8">
+             <div className="flex flex-col">
+               <span className="text-gray-400 text-[10px] uppercase font-bold">距20日线</span>
+               <span className="text-xl font-mono font-bold">{formatValue(selectedRecord.close_to_ma_20)}</span>
+             </div>
+             <div className="flex flex-col">
+               <span className="text-gray-400 text-[10px] uppercase font-bold">距60日线</span>
+               <span className="text-xl font-mono font-bold">{formatValue(selectedRecord.close_to_ma_60)}</span>
+             </div>
+             <div className="flex flex-col">
+               <span className="text-gray-400 text-[10px] uppercase font-bold">20日动量</span>
+               <span className="text-xl font-mono font-bold">{formatValue(selectedRecord.mom_20)}</span>
+             </div>
+             <div className="flex flex-col">
+               <span className="text-gray-400 text-[10px] uppercase font-bold">20日波动</span>
+               <span className="text-xl font-mono font-bold text-erp-warning">{formatValue(selectedRecord.vol_20)}</span>
+             </div>
+          </div>
+        </div>
 
-        <ContextStrip items={factorContextItems} />
-
-        <PageFilterBar
-          title="切换因子"
-          meta={
-            <div className="badge-row">
-              <Badge tone={summaryQuery.data?.available ? 'good' : 'warn'}>
-                {summaryQuery.data?.available ? '因子可用' : '因子缺失'}
-              </Badge>
-              <Badge tone="brand">{String((summaryQuery.data?.selectedSymbol ?? params.symbol) || '-')}</Badge>
+        {/* Middle Section: Ranking and Missing Rates */}
+        <div className="grid grid-cols-2 gap-12">
+          {/* Factor Ranking */}
+          <section className="flex flex-col gap-6">
+            <div className="flex items-center justify-between">
+              <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3">
+                <i className="ph ph-list-numbers"></i> 因子排名截面 (Factor Cross-Section)
+              </h4>
+              {selectedFactorDescription && <span className="text-[10px] text-gray-400 font-normal italic pr-2">{selectedFactorDescription}</span>}
             </div>
-          }
-        >
-          <ControlGrid variant="triple">
-            <ControlField label="查看排名的因子">
-              <select value={summaryQuery.data?.selectedFactor ?? params.factor} onChange={(event) => updateParams({ factor: event.target.value })}>
-                {factorOptions.map((option) => (
-                  <option key={option.key} value={option.key}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </ControlField>
-            <ControlField label="历史走势因子">
-              <select
-                value={summaryQuery.data?.selectedHistoryFactor ?? params.historyFactor}
-                onChange={(event) => updateParams({ historyFactor: event.target.value })}
-              >
-                {factorOptions.map((option) => (
-                  <option key={option.key} value={option.key}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </ControlField>
-            <ControlField label="查看股票">
-              <select value={summaryQuery.data?.selectedSymbol ?? params.symbol} onChange={(event) => updateParams({ symbol: event.target.value })}>
-                {(summaryQuery.data?.symbolOptions ?? []).map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </ControlField>
-          </ControlGrid>
-        </PageFilterBar>
-      </Panel>
-
-      <div className="split-layout">
-        <Panel title="因子排名" tone="calm" className="panel--table-surface">
-          <DataTable
-            rows={ranking}
-            columns={RANKING_COLUMNS}
-            storageKey="factor-ranking"
-            viewPresets={FACTOR_RANKING_PRESETS}
-            defaultPresetKey="compact"
-            columnLabels={RANKING_COLUMN_LABELS}
-            loading={summaryQuery.isLoading}
-            emptyText="暂无因子排名"
-            stickyFirstColumn
-            cellRenderers={rankingCellRenderers}
-          />
-        </Panel>
-
-        <SupportPanel title="缺失">
-          <DataTable
-            rows={missingRates}
-            columns={MISSING_COLUMNS}
-            storageKey="factor-missing"
-            columnLabels={MISSING_COLUMN_LABELS}
-            emptyText="暂无缺失率数据"
-            stickyFirstColumn
-          />
-        </SupportPanel>
-      </div>
-
-      <div className="split-layout">
-        <Panel title="当前股票" className="panel--summary-surface">
-          <SectionBlock title="当前股票快照">
-            <SpotlightCard
-              title={String(selectedRecord.name ?? summaryQuery.data?.selectedSymbol ?? '未选择股票')}
-              meta={String(summaryQuery.data?.selectedSymbol ?? '-')}
-              badges={[
-                selectedRecord.industry ? { label: String(selectedRecord.industry), tone: 'brand' as const } : null,
-                topRank && String(topRank.ts_code ?? '') === String(summaryQuery.data?.selectedSymbol ?? '') ? { label: '当前头部股票', tone: 'good' as const } : null,
-              ].filter(Boolean) as Array<{ label: string; tone?: 'default' | 'brand' | 'good' | 'warn' }>}
-              metrics={[
-                { label: '距 20 日线', value: formatValue(selectedRecord.close_to_ma_20) },
-                { label: '距 60 日线', value: formatValue(selectedRecord.close_to_ma_60) },
-                { label: '20 日动量', value: formatValue(selectedRecord.mom_20) },
-                { label: '20 日波动', value: formatValue(selectedRecord.vol_20), tone: 'warn' },
-              ]}
-            />
-          </SectionBlock>
-        </Panel>
-
-        <SupportPanel title="字段">
-          <SectionBlock title="完整字段快照" collapsible defaultExpanded={false}>
-            <DataTable
-              rows={detailQuery.data?.snapshot ?? []}
-              columns={SNAPSHOT_COLUMNS}
-              storageKey="factor-snapshot"
-              emptyText="暂无因子快照"
-              stickyFirstColumn
-            />
-          </SectionBlock>
-        </SupportPanel>
-      </div>
-
-      <SupportPanel title="历史">
-        <SectionBlock title="历史因子走势" tone="emphasis">
-          <PropertyGrid
-            items={[
-              { label: '当前因子', value: formatValue(summaryQuery.data?.selectedFactor ?? params.factor), span: 'double' },
-              { label: '历史序列', value: formatValue(summaryQuery.data?.selectedHistoryFactor ?? params.historyFactor), span: 'double' },
-              { label: '当前股票', value: formatValue(summaryQuery.data?.selectedSymbol ?? params.symbol), span: 'double' },
-              { label: '头部股票', value: topRank ? `${formatValue(topRank.ts_code)} / ${formatValue(topRank.name)}` : '-', span: 'double', tone: 'good' },
-              { label: '最高缺失因子', value: formatValue(worstMissing?.feature), span: 'double', tone: 'warn' },
-              { label: '最高缺失率', value: formatValue(worstMissing?.missing_rate), tone: 'warn' },
-              { label: '最新截面日期', value: formatDate(summaryQuery.data?.latestDate) },
-            ]}
-          />
-        </SectionBlock>
-
-        <LineChartCard
-          data={historyRows}
-          xKey="trade_date"
-          lineKeys={activeHistoryView?.lineKeys}
-          title="历史因子走势"
-          subtitle={activeHistoryView?.subtitle ?? '按当前选中的股票和因子查看时间序列变化。'}
-          actions={
-            historyViewOptions.length > 1 ? (
-              <SegmentedControl
-                label="切换因子预设"
-                value={activeHistoryView?.key ?? historyViewOptions[0].key}
-                options={historyViewOptions.map((option) => ({ key: option.key, label: option.label }))}
-                onChange={setHistoryView}
+            <div className="erp-border rounded-lg overflow-hidden h-[400px]">
+               <DataTable
+                rows={ranking}
+                columns={RANKING_COLUMNS}
+                storageKey="factor-ranking"
+                viewPresets={FACTOR_RANKING_PRESETS}
+                defaultPresetKey="compact"
+                columnLabels={RANKING_COLUMN_LABELS}
+                loading={summaryQuery.isLoading}
+                emptyText="暂无因子排名"
+                stickyFirstColumn
+                cellRenderers={rankingCellRenderers}
               />
-            ) : null
-          }
-          emptyText={detailQuery.isLoading ? '加载中...' : '暂无因子历史'}
-        />
-      </SupportPanel>
+            </div>
+          </section>
+
+          {/* Missing Rates and Snapshot */}
+          <div className="flex flex-col gap-10">
+             <section className="flex flex-col gap-6">
+                <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3">
+                  <i className="ph ph-database"></i> 数据缺失率核查 (Missing Rates)
+                </h4>
+                <div className="erp-border rounded-lg overflow-hidden h-[250px]">
+                  <DataTable
+                    rows={missingRates}
+                    columns={MISSING_COLUMNS}
+                    storageKey="factor-missing"
+                    columnLabels={MISSING_COLUMN_LABELS}
+                    emptyText="暂无缺失率数据"
+                    stickyFirstColumn
+                  />
+                </div>
+             </section>
+             
+             <section className="flex flex-col gap-6">
+                <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3">
+                  <i className="ph ph-magnifying-glass"></i> 全因子属性快照 (Full Snapshot)
+                </h4>
+                <div className="erp-border rounded-lg overflow-hidden h-[300px]">
+                   <DataTable
+                    rows={detailQuery.data?.snapshot ?? []}
+                    columns={SNAPSHOT_COLUMNS}
+                    storageKey="factor-snapshot"
+                    emptyText="暂无快照"
+                    stickyFirstColumn
+                  />
+                </div>
+             </section>
+          </div>
+        </div>
+
+        {/* Bottom Section: History Curve */}
+        <section className="flex flex-col gap-6 border-t erp-border pt-10">
+           <div className="flex items-center justify-between">
+              <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3">
+                <i className="ph ph-chart-line"></i> 因子历史时序走势 (Time Series)
+              </h4>
+              {historyViewOptions.length > 1 && (
+                <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-md erp-border">
+                  {historyViewOptions.slice(0, 5).map((option) => (
+                    <button
+                      key={option.key}
+                      onClick={() => setHistoryView(option.key)}
+                      className={`px-3 py-1 text-[11px] rounded transition-all ${activeHistoryView.key === option.key ? 'bg-white shadow-sm font-bold text-erp-primary border erp-border' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+           </div>
+           <div className="erp-border rounded-lg p-6 bg-gray-50/30 h-[500px]">
+             <LineChartCard
+                data={historyRows}
+                xKey="trade_date"
+                lineKeys={activeHistoryView?.lineKeys}
+                title=""
+                emptyText={detailQuery.isLoading ? '加载数据中...' : '暂无时序数据'}
+              />
+           </div>
+        </section>
+      </div>
     </div>
   )
 }

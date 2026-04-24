@@ -61,11 +61,18 @@ export function LineChartCard({
       <div className="chart-card__canvas">
         <ResponsiveContainer width="100%" height={320}>
           <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(70, 52, 30, 0.12)" />
-            <XAxis dataKey={xKey} tick={{ fill: '#5f5648', fontSize: 12 }} minTickGap={24} />
-            <YAxis tick={{ fill: '#5f5648', fontSize: 12 }} width={72} />
-            <Tooltip />
-            <Legend />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+            <XAxis dataKey={xKey} tick={{ fill: 'var(--chart-tick)', fontSize: 11 }} minTickGap={24} />
+            <YAxis tick={{ fill: 'var(--chart-tick)', fontSize: 11 }} width={64} />
+            <Tooltip 
+              contentStyle={{ 
+                backgroundColor: 'var(--chart-tooltip-bg)', 
+                borderColor: 'var(--chart-tooltip-border)',
+                color: 'var(--color-erp-text)',
+                fontSize: '12px'
+              }} 
+            />
+            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
             {resolvedLineKeys.map((lineKey, index) => (
               <Line
                 key={lineKey}

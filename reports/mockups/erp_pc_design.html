@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A股量化交易核心系统 (ERP Mode)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        erp: {
+                            bg: '#f0f2f5',
+                            surface: '#ffffff',
+                            border: '#cfd8dc',
+                            header: '#1e293b', 
+                            headerText: '#f8fafc',
+                            primary: '#0369a1',
+                            primaryHover: '#0ea5e9',
+                            rowEven: '#ffffff',
+                            rowOdd: '#fafafa',
+                            rowHover: '#f0f9ff',
+                            text: '#334155',
+                            muted: '#64748b',
+                            success: '#16a34a',
+                            danger: '#dc2626',
+                            warning: '#d97706'
+                        }
+                    },
+                    fontSize: {
+                        'erp': '13px',
+                        'erp-sm': '11px'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-size: 13px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: theme('colors.erp.bg');
+            color: theme('colors.erp.text');
+        }
+        .erp-border { border: 1px solid theme('colors.erp.border'); }
+        .erp-border-b { border-bottom: 1px solid theme('colors.erp.border'); }
+        .erp-border-r { border-right: 1px solid theme('colors.erp.border'); }
+        .erp-border-t { border-top: 1px solid theme('colors.erp.border'); }
+        
+        .ag-grid { display: flex; flex-direction: column; height: 100%; }
+        .ag-header { 
+            display: flex; 
+            background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+            border-bottom: 1px solid theme('colors.erp.border');
+            font-weight: 600;
+        }
+        .ag-header-cell {
+            padding: 6px 8px;
+            border-right: 1px solid theme('colors.erp.border');
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ag-row {
+            display: flex;
+            border-bottom: 1px solid theme('colors.erp.border');
+            transition: background-color 0.1s;
+        }
+        .ag-row:nth-child(even) { background-color: theme('colors.erp.rowEven'); }
+        .ag-row:nth-child(odd) { background-color: theme('colors.erp.rowOdd'); }
+        .ag-row:hover { background-color: theme('colors.erp.rowHover'); cursor: default; }
+        .ag-row.selected { background-color: #bae6fd; }
+        
+        .ag-cell {
+            padding: 4px 8px;
+            border-right: 1px solid theme('colors.erp.border');
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: flex;
+            align-items: center;
+        }
+        
+        .ag-cell.numeric { justify-content: flex-end; font-variant-numeric: tabular-nums; font-family: 'Consolas', monospace; }
+        
+        .splitter-h { cursor: row-resize; height: 4px; background: theme('colors.erp.border'); width: 100%; }
+        .splitter-h:hover { background: theme('colors.erp.primary'); }
+        .splitter-v { cursor: col-resize; width: 4px; background: theme('colors.erp.border'); height: 100%; }
+        .splitter-v:hover { background: theme('colors.erp.primary'); }
+        
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-left: 1px solid theme('colors.erp.border'); }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 0px; border: 1px solid #f1f1f1; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .toolbar-btn {
+            display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 3px; border: 1px solid transparent; cursor: pointer; color: theme('colors.erp.text');
+        }
+        .toolbar-btn:hover { background-color: #e2e8f0; border-color: #cbd5e1; }
+        .toolbar-btn:active { background-color: #cbd5e1; }
+        .toolbar-btn.disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col overflow-hidden select-none" x-data="{ 
+    activeTab: 'monitor',
+    selectedRow: 1,
+    treeOpen: { strategies: true, risk: false, data: false }
+}">
+
+    <div class="h-7 bg-white erp-border-b flex items-center px-2 text-erp-sm text-erp-text gap-4">
+        <div class="font-bold text-erp-primary flex items-center gap-1 cursor-default mr-4">
+            <i class="ph-fill ph-chart-line-up text-[16px]"></i> 量化交易 ERP
+        </div>
+        <div class="cursor-pointer hover:bg-gray-100 px-2 py-0.5 rounded">文件(F)</div>
+        <div class="cursor-pointer hover:bg-gray-100 px-2 py-0.5 rounded">编辑(E)</div>
+        <div class="cursor-pointer hover:bg-gray-100 px-2 py-0.5 rounded">视图(V)</div>
+        <div class="cursor-pointer hover:bg-gray-100 px-2 py-0.5 rounded">策略(S)</div>
+        <div class="cursor-pointer hover:bg-gray-100 px-2 py-0.5 rounded">风控(R)</div>
+        <div class="cursor-pointer hover:bg-gray-100 px-2 py-0.5 rounded">工具(T)</div>
+        <div class="cursor-pointer hover:bg-gray-100 px-2 py-0.5 rounded">帮助(H)</div>
+        
+        <div class="ml-auto flex items-center gap-3">
+            <div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full bg-erp-success"></div> 环境: 生产 (PROD)</div>
+            <div class="w-px h-3 bg-gray-300"></div>
+            <div>用户: Admin (1001)</div>
+        </div>
+    </div>
+
+    <div class="h-10 bg-gray-50 erp-border-b flex items-center px-2 gap-1 overflow-x-auto">
+        <button class="toolbar-btn"><i class="ph ph-plus-circle text-erp-success text-[16px]"></i> 新建策略</button>
+        <button class="toolbar-btn"><i class="ph ph-play-circle text-erp-success text-[16px]"></i> 全部启动</button>
+        <button class="toolbar-btn"><i class="ph ph-stop-circle text-erp-danger text-[16px]"></i> 全部停止</button>
+        <div class="w-px h-6 bg-gray-300 mx-1"></div>
+        <button class="toolbar-btn"><i class="ph ph-arrows-clockwise text-erp-primary text-[16px]"></i> 刷新数据</button>
+        <button class="toolbar-btn"><i class="ph ph-export text-[16px]"></i> 导出 Excel</button>
+        <div class="w-px h-6 bg-gray-300 mx-1"></div>
+        <div class="flex items-center gap-2 bg-white erp-border px-2 py-1 rounded">
+            <i class="ph ph-magnifying-glass text-gray-400"></i>
+            <input type="text" placeholder="搜索代码、策略、订单..." class="outline-none text-erp-sm w-48 bg-transparent">
+        </div>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden">
+        
+        <div class="w-60 bg-white flex flex-col erp-border-r shrink-0">
+            <div class="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-erp-sm text-gray-600">
+                系统导航树
+            </div>
+            <div class="flex-1 overflow-y-auto py-2">
+                <div class="flex items-center gap-1.5 px-3 py-1 cursor-pointer hover:bg-gray-100">
+                    <i class="ph-fill ph-squares-four text-gray-500"></i> 交易总览
+                </div>
+                
+                <div class="mt-1">
+                    <div class="flex items-center gap-1.5 px-3 py-1 cursor-pointer hover:bg-gray-100" @click="treeOpen.strategies = !treeOpen.strategies">
+                        <i class="ph-bold text-gray-400 text-[10px] w-3" :class="treeOpen.strategies ? 'ph-caret-down' : 'ph-caret-right'"></i>
+                        <i class="ph-fill ph-folder-open text-yellow-500" x-show="treeOpen.strategies"></i>
+                        <i class="ph-fill ph-folder text-yellow-500" x-show="!treeOpen.strategies"></i>
+                        策略管理 (3)
+                    </div>
+                    <div x-show="treeOpen.strategies" class="pl-8">
+                        <div class="flex items-center gap-1.5 px-2 py-1 cursor-pointer bg-[#e0f2fe] border-l-2 border-erp-primary">
+                            <div class="w-1.5 h-1.5 rounded-full bg-erp-success"></div>
+                            <span>Alpha-01 多因子</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-gray-100 border-l-2 border-transparent">
+                            <div class="w-1.5 h-1.5 rounded-full bg-erp-success"></div>
+                            <span>Beta-Neutral 宏观</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-gray-100 border-l-2 border-transparent">
+                            <div class="w-1.5 h-1.5 rounded-full bg-gray-400"></div>
+                            <span class="text-gray-500">CTA-Trend (已停止)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-1">
+                    <div class="flex items-center gap-1.5 px-3 py-1 cursor-pointer hover:bg-gray-100" @click="treeOpen.risk = !treeOpen.risk">
+                        <i class="ph-bold text-gray-400 text-[10px] w-3" :class="treeOpen.risk ? 'ph-caret-down' : 'ph-caret-right'"></i>
+                        <i class="ph-fill ph-shield-warning text-red-500"></i>
+                        风控中心
+                    </div>
+                    <div x-show="treeOpen.risk" class="pl-8 text-gray-600">
+                        <div class="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-gray-100">规则管理</div>
+                        <div class="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-gray-100">异常监控 (2)</div>
+                    </div>
+                </div>
+
+                <div class="mt-1">
+                    <div class="flex items-center gap-1.5 px-3 py-1 cursor-pointer hover:bg-gray-100" @click="treeOpen.data = !treeOpen.data">
+                        <i class="ph-bold text-gray-400 text-[10px] w-3" :class="treeOpen.data ? 'ph-caret-down' : 'ph-caret-right'"></i>
+                        <i class="ph-fill ph-database text-gray-500"></i>
+                        数据与日志
+                    </div>
+                    <div x-show="treeOpen.data" class="pl-8 text-gray-600">
+                        <div class="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-gray-100">历史订单查询</div>
+                        <div class="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-gray-100">交割单对账</div>
+                        <div class="flex items-center gap-1.5 px-2 py-1 cursor-pointer hover:bg-gray-100">系统运行日志</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="splitter-v shrink-0"></div>
+
+        <div class="flex flex-1 flex-col overflow-hidden bg-erp-bg">
+            
+            <div class="flex bg-gray-200 pt-1 px-1 gap-1 border-b border-gray-300">
+                <div class="px-4 py-1.5 text-erp-sm rounded-t border border-b-0 cursor-pointer flex items-center gap-2 max-w-[200px] truncate"
+                     :class="activeTab === 'monitor' ? 'bg-white border-gray-300 font-semibold z-10' : 'bg-gray-100 border-gray-300 text-gray-600 hover:bg-white/80 -mb-px'"
+                     @click="activeTab = 'monitor'">
+                    <i class="ph-fill ph-monitor-play text-erp-primary"></i> Alpha-01 监控面板
+                    <i class="ph ph-x ml-auto hover:text-red-500"></i>
+                </div>
+                <div class="px-4 py-1.5 text-erp-sm rounded-t border border-b-0 cursor-pointer flex items-center gap-2 max-w-[200px] truncate"
+                     :class="activeTab === 'orders' ? 'bg-white border-gray-300 font-semibold z-10' : 'bg-gray-100 border-gray-300 text-gray-600 hover:bg-white/80 -mb-px'"
+                     @click="activeTab = 'orders'">
+                    <i class="ph-fill ph-list-dashes text-gray-500"></i> 当日委托流水
+                    <i class="ph ph-x ml-auto hover:text-red-500"></i>
+                </div>
+            </div>
+
+            <div x-show="activeTab === 'monitor'" class="flex-1 flex flex-col overflow-hidden">
+                <div class="h-9 bg-white erp-border-b flex items-center px-2 gap-2 shrink-0">
+                    <span class="font-bold text-gray-700 mr-2">Alpha-01</span>
+                    <span class="px-1.5 py-0.5 bg-green-100 text-green-700 text-erp-sm border border-green-200 rounded">运行中 (Running)</span>
+                    <div class="w-px h-5 bg-gray-300 mx-2"></div>
+                    <button class="toolbar-btn"><i class="ph ph-pause-circle text-erp-warning text-[16px]"></i> 暂停建仓</button>
+                    <button class="toolbar-btn"><i class="ph ph-broom text-[16px]"></i> 一键清仓</button>
+                    <button class="toolbar-btn"><i class="ph ph-sliders text-[16px]"></i> 策略参数</button>
+                    
+                    <div class="ml-auto flex items-center gap-4 text-erp-sm">
+                        <div class="flex items-center gap-1"><span class="text-gray-500">当日总收益:</span> <span class="font-bold text-erp-danger font-mono">+12,450.00</span></div>
+                        <div class="flex items-center gap-1"><span class="text-gray-500">仓位使用率:</span> <span class="font-bold font-mono">85.4%</span></div>
+                    </div>
+                </div>
+
+                <div class="flex-1 flex flex-col overflow-hidden">
+                    <div class="flex-1 bg-white flex flex-col relative" style="flex-basis: 60%;">
+                        <div class="ag-grid">
+                            <div class="ag-header text-gray-600 text-erp-sm">
+                                <div class="ag-header-cell" style="width: 40px; justify-content: center;"><input type="checkbox"></div>
+                                <div class="ag-header-cell" style="width: 80px;">证券代码</div>
+                                <div class="ag-header-cell" style="width: 100px;">证券名称</div>
+                                <div class="ag-header-cell" style="width: 60px;">方向</div>
+                                <div class="ag-header-cell numeric" style="width: 100px;">持仓量</div>
+                                <div class="ag-header-cell numeric" style="width: 100px;">可用数量</div>
+                                <div class="ag-header-cell numeric" style="width: 90px;">成本价</div>
+                                <div class="ag-header-cell numeric" style="width: 90px;">现价</div>
+                                <div class="ag-header-cell numeric" style="width: 110px;">持仓盈亏</div>
+                                <div class="ag-header-cell numeric" style="width: 80px;">盈亏率</div>
+                                <div class="ag-header-cell" style="width: 100px;">交易状态</div>
+                                <div class="ag-header-cell" style="flex: 1;">操作</div>
+                            </div>
+                            
+                            <div class="flex-1 overflow-auto">
+                                <div class="ag-row cursor-pointer" :class="selectedRow === 1 ? 'selected' : ''" @click="selectedRow = 1">
+                                    <div class="ag-cell" style="width: 40px; justify-content: center;"><input type="checkbox"></div>
+                                    <div class="ag-cell font-mono" style="width: 80px;">000001.SZ</div>
+                                    <div class="ag-cell" style="width: 100px;">平安银行</div>
+                                    <div class="ag-cell" style="width: 60px;"><span class="text-erp-danger font-bold">多</span></div>
+                                    <div class="ag-cell numeric" style="width: 100px;">15,000</div>
+                                    <div class="ag-cell numeric" style="width: 100px;">15,000</div>
+                                    <div class="ag-cell numeric" style="width: 90px;">10.45</div>
+                                    <div class="ag-cell numeric" style="width: 90px;">10.82</div>
+                                    <div class="ag-cell numeric text-erp-danger" style="width: 110px;">+5,550.00</div>
+                                    <div class="ag-cell numeric text-erp-danger" style="width: 80px;">+3.54%</div>
+                                    <div class="ag-cell" style="width: 100px;"><span class="text-gray-500">监控中</span></div>
+                                    <div class="ag-cell" style="flex: 1; justify-content: flex-start; gap: 8px;">
+                                        <a href="#" class="text-erp-primary hover:underline">平仓</a>
+                                    </div>
+                                </div>
+                                <div class="ag-row cursor-pointer" :class="selectedRow === 2 ? 'selected' : ''" @click="selectedRow = 2">
+                                    <div class="ag-cell" style="width: 40px; justify-content: center;"><input type="checkbox"></div>
+                                    <div class="ag-cell font-mono" style="width: 80px;">600519.SH</div>
+                                    <div class="ag-cell" style="width: 100px;">贵州茅台</div>
+                                    <div class="ag-cell" style="width: 60px;"><span class="text-erp-danger font-bold">多</span></div>
+                                    <div class="ag-cell numeric" style="width: 100px;">200</div>
+                                    <div class="ag-cell numeric" style="width: 100px;">200</div>
+                                    <div class="ag-cell numeric" style="width: 90px;">1,680.00</div>
+                                    <div class="ag-cell numeric" style="width: 90px;">1,675.00</div>
+                                    <div class="ag-cell numeric text-erp-success" style="width: 110px;">-1,000.00</div>
+                                    <div class="ag-cell numeric text-erp-success" style="width: 80px;">-0.30%</div>
+                                    <div class="ag-cell" style="width: 100px;"><span class="text-gray-500">监控中</span></div>
+                                    <div class="ag-cell" style="flex: 1; justify-content: flex-start; gap: 8px;">
+                                        <a href="#" class="text-erp-primary hover:underline">平仓</a>
+                                    </div>
+                                </div>
+                                <div class="ag-row cursor-pointer" :class="selectedRow === 3 ? 'selected' : ''" @click="selectedRow = 3">
+                                    <div class="ag-cell" style="width: 40px; justify-content: center;"><input type="checkbox"></div>
+                                    <div class="ag-cell font-mono" style="width: 80px;">300750.SZ</div>
+                                    <div class="ag-cell" style="width: 100px;">宁德时代</div>
+                                    <div class="ag-cell" style="width: 60px;"><span class="text-erp-danger font-bold">多</span></div>
+                                    <div class="ag-cell numeric" style="width: 100px;">3,500</div>
+                                    <div class="ag-cell numeric" style="width: 100px;">0</div>
+                                    <div class="ag-cell numeric" style="width: 90px;">156.20</div>
+                                    <div class="ag-cell numeric" style="width: 90px;">162.50</div>
+                                    <div class="ag-cell numeric text-erp-danger" style="width: 110px;">+22,050.00</div>
+                                    <div class="ag-cell numeric text-erp-danger" style="width: 80px;">+4.03%</div>
+                                    <div class="ag-cell" style="width: 100px;"><span class="text-erp-warning font-bold">报单中(部分)</span></div>
+                                    <div class="ag-cell" style="flex: 1; justify-content: flex-start; gap: 8px;">
+                                        <a href="#" class="text-erp-primary hover:underline">撤单</a>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="h-8 erp-border-t bg-gray-50 flex items-center px-2 justify-between text-gray-500">
+                                <div>共 143 条记录, 已选择 1 条</div>
+                                <div class="flex items-center gap-2">
+                                    <button class="toolbar-btn"><i class="ph ph-caret-left"></i></button>
+                                    <span>第 1 页 / 共 4 页</span>
+                                    <button class="toolbar-btn"><i class="ph ph-caret-right"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="splitter-h shrink-0"></div>
+
+                    <div class="flex-1 bg-white flex" style="flex-basis: 40%;">
+                        <div class="w-[30%] min-w-[250px] erp-border-r flex flex-col bg-gray-50">
+                            <div class="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700">
+                                <span x-show="selectedRow === 1">属性 - 平安银行 (000001.SZ)</span>
+                                <span x-show="selectedRow === 2">属性 - 贵州茅台 (600519.SH)</span>
+                                <span x-show="selectedRow === 3">属性 - 宁德时代 (300750.SZ)</span>
+                            </div>
+                            <div class="p-3 overflow-y-auto">
+                                <table class="w-full text-left border-collapse" x-show="selectedRow === 1">
+                                    <tbody>
+                                        <tr><td class="py-1 text-gray-500 w-24">内部代码</td><td class="font-mono">T-SZ-000001</td></tr>
+                                        <tr><td class="py-1 text-gray-500">因子得分</td><td class="font-mono text-erp-danger">0.845</td></tr>
+                                        <tr><td class="py-1 text-gray-500">风控状态</td><td><span class="px-1 py-0.5 bg-green-100 text-green-700 rounded text-erp-sm border border-green-200">正常</span></td></tr>
+                                        <tr><td class="py-1 text-gray-500">止损线</td><td class="font-mono">9.80 (-6.22%)</td></tr>
+                                        <tr><td class="py-1 text-gray-500">止盈线</td><td class="font-mono">11.50 (+10.05%)</td></tr>
+                                    </tbody>
+                                </table>
+                                <table class="w-full text-left border-collapse" x-show="selectedRow === 2">
+                                    <tbody>
+                                        <tr><td class="py-1 text-gray-500 w-24">内部代码</td><td class="font-mono">T-SH-600519</td></tr>
+                                        <tr><td class="py-1 text-gray-500">因子得分</td><td class="font-mono text-erp-success">0.412</td></tr>
+                                        <tr><td class="py-1 text-gray-500">风控状态</td><td><span class="px-1 py-0.5 bg-green-100 text-green-700 rounded text-erp-sm border border-green-200">正常</span></td></tr>
+                                    </tbody>
+                                </table>
+                                <table class="w-full text-left border-collapse" x-show="selectedRow === 3">
+                                    <tbody>
+                                        <tr><td class="py-1 text-gray-500 w-24">内部代码</td><td class="font-mono">T-SZ-300750</td></tr>
+                                        <tr><td class="py-1 text-gray-500">因子得分</td><td class="font-mono text-erp-danger">0.910</td></tr>
+                                        <tr><td class="py-1 text-gray-500">风控状态</td><td><span class="px-1 py-0.5 bg-yellow-100 text-yellow-700 rounded text-erp-sm border border-yellow-200">日内异动</span></td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <div class="flex-1 flex flex-col">
+                            <div class="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700 gap-4">
+                                <span class="border-b-2 border-erp-primary text-erp-primary h-full flex items-center cursor-pointer">执行日志 (Console)</span>
+                                <span class="h-full flex items-center cursor-pointer text-gray-500 hover:text-gray-700">关联委托</span>
+                            </div>
+                            <div class="flex-1 bg-[#1e1e1e] p-2 font-mono text-[12px] text-gray-300 overflow-y-auto leading-relaxed">
+                                <div>[10:30:15.123] [INFO] [Alpha-01] Received quote tick for 600519.SH: Price=1675.00, Vol=14200</div>
+                                <div>[10:30:15.125] [INFO] [Alpha-01] Evaluated factor model. Score=0.845. Action=HOLD.</div>
+                                <div><span class="text-green-400">[10:31:00.000] [INFO] [Alpha-01] Strategy routine check passed. Active positions=143.</span></div>
+                                <div><span class="text-yellow-400">[10:32:14.551] [WARN] [RiskManager] 300750.SZ approaching intraday volatility limit (3.8%).</span></div>
+                                <div>[10:32:15.102] [INFO] [OrderGateway] Order #89921 for 300750.SZ partially filled: 1500@162.45.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div x-show="activeTab === 'orders'" class="flex-1 bg-white p-4 text-gray-500 flex items-center justify-center">
+                当日委托流水区域 (开发中...)
+            </div>
+        </div>
+    </div>
+
+    <div class="h-6 bg-gray-100 erp-border-t flex items-center px-3 text-erp-sm text-gray-600 gap-4 shrink-0">
+        <div>系统状态: <span class="text-erp-success">正常</span></div>
+        <div class="w-px h-3 bg-gray-300"></div>
+        <div>行情延迟: <span class="font-mono">12ms</span></div>
+        <div class="w-px h-3 bg-gray-300"></div>
+        <div>交易网关: <span class="text-erp-success">已连接 (CTP)</span></div>
+        <div class="ml-auto font-mono">
+            2026-04-22 10:35:42
+        </div>
+    </div>
+
+</body>
+</html>

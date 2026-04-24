@@ -1,24 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, NavLink } from 'react-router-dom'
 
 import { apiGet } from '../api/client'
-import { Badge } from '../components/Badge'
-import { DetailPageNav } from '../components/DetailPageNav'
 import { LineChartCard } from '../components/LineChartCard'
-import { Panel } from '../components/Panel'
-import { PropertyGrid } from '../components/PropertyGrid'
 import { QueryNotice } from '../components/QueryNotice'
-import { SectionBlock } from '../components/SectionBlock'
-import { SegmentedControl } from '../components/SegmentedControl'
-import { SpotlightCard } from '../components/SpotlightCard'
-import { SupportPanel } from '../components/SupportPanel'
-import { WorkspaceHero } from '../components/WorkspaceHero'
 import { candidateDetailClient, candidateHistoryClient, candidatesPageClient, candidatesSummaryClient } from '../facades/dashboardPageClient'
 import { usePageSearchState } from '../facades/usePageSearchState'
 import { formatDate, formatPercent, formatValue } from '../lib/format'
 import { buildAiReviewPath, buildCandidatesPath, buildWatchlistPath } from '../lib/shareLinks'
-import type { CandidateDetailPayload, CandidateHistoryPayload } from '../types/api'
+import type { CandidateDetailPayload, CandidateHistoryPayload, CandidatesSummaryPayload } from '../types/api'
 
 function buildScoreViewOptions(keys: string[]) {
   if (!keys.length) {
@@ -49,7 +40,7 @@ export function CandidateDetailPage() {
 
   const summaryQuery = useQuery({
     queryKey: candidatesSummaryClient.queryKey(params),
-    queryFn: () => apiGet<any>(candidatesSummaryClient.path(params)),
+    queryFn: () => apiGet<CandidatesSummaryPayload>(candidatesSummaryClient.path(params)),
   })
 
   const historyQuery = useQuery({
@@ -70,93 +61,161 @@ export function CandidateDetailPage() {
   const currentPositionLabel = currentIndex >= 0 ? `${currentIndex + 1} / ${symbolOptions.length}` : '-'
 
   return (
-    <div className="page-stack">
-      <WorkspaceHero
-        title="候选详情"
-        eyebrow="候选股 / 详情"
-        badges={
-          <>
-            <Badge tone="brand">{String(detail.ts_code ?? symbol)}</Badge>
-            <Badge tone="default">{String(params.model).toUpperCase()}</Badge>
-            <Badge tone="default">{String(params.split).toUpperCase()}</Badge>
-            <Badge>{`序号 ${currentPositionLabel}`}</Badge>
-          </>
-        }
-      />
+    <div className="flex-1 flex flex-col overflow-hidden text-erp bg-erp-bg">
+      {/* Top Header Row for Detail */}
+      <div className="h-10 bg-white erp-border-b flex items-center px-3 gap-3 shrink-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
+        <NavLink to={`/candidates${location.search}`} className="toolbar-btn shrink-0">
+          <i className="ph ph-arrow-left text-erp-primary"></i> 返回列表
+        </NavLink>
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+        <span className="font-bold text-gray-700 mr-2 flex items-center gap-2 shrink-0">
+          <i className="ph-fill ph-lightning text-erp-danger"></i>
+          {String(detail.name || symbol)} ({symbol})
+        </span>
+        <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 text-erp-sm border border-blue-200 rounded shrink-0">
+          {String(params.model).toUpperCase()} / {String(params.split).toUpperCase()}
+        </span>
+        <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-erp-sm border border-gray-200 rounded shrink-0">
+          序号 {currentPositionLabel}
+        </span>
+        
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+        
+        <button className="toolbar-btn shrink-0" onClick={() => navigate(buildWatchlistPath(symbol))}>
+          <i className="ph ph-target"></i> 查看持仓
+        </button>
+        <button className="toolbar-btn shrink-0" onClick={() => navigate(buildAiReviewPath(symbol))}>
+          <i className="ph ph-brain text-erp-primary"></i> AI 分析
+        </button>
 
-      <Panel title="详情" tone="warm" className="panel--summary-surface">
-        <QueryNotice isLoading={detailQuery.isLoading || historyQuery.isLoading} error={detailQuery.error ?? historyQuery.error} />
-        {Object.keys(detail).length ? (
-          <SectionBlock title="核心概览" tone="emphasis">
-            <SpotlightCard
-              title={String(detail.name ?? '-')}
-              meta={String(detail.ts_code ?? '')}
-              subtitle={String(detail.action_hint ?? '暂无建议')}
-              badges={[
-                { label: '候选池', tone: 'brand' },
-                { label: formatDate(detail.trade_date) },
-              ]}
-              metrics={[
-                { label: '当前排名', value: detail.rank ?? '-' },
-                { label: '综合分数', value: detail.score ?? '-' },
-                { label: '排名分位', value: formatPercent(detail.rank_pct) },
-                { label: '未来10日收益', value: formatPercent(detail.ret_t1_t10) },
-              ]}
-            />
-          </SectionBlock>
-        ) : (
-          <div className="empty-state">暂无候选详情</div>
-        )}
-      </Panel>
-
-      <div className="split-layout">
-        <SupportPanel title="交易背景">
-          <PropertyGrid
-            items={[
-              { label: '行业', value: formatValue(detail.industry) },
-              { label: '当日涨跌', value: formatPercent(detail.pct_chg) },
-              { label: '20日动量', value: formatPercent(detail.mom_20) },
-              { label: '距20日线', value: formatPercent(detail.close_to_ma_20) },
-            ]}
-          />
-        </SupportPanel>
-
-        <SupportPanel title="评分历史">
-          {scoreViewOptions.length ? (
-            <SegmentedControl
-              label="切换评分预设"
-              value={activeScoreView?.key ?? scoreViewOptions[0].key}
-              options={scoreViewOptions.map((item) => ({ key: item.key, label: item.label }))}
-              onChange={setScoreView}
-            />
-          ) : null}
-          <LineChartCard
-            data={scoreHistory}
-            xKey="trade_date"
-            lineKeys={activeScoreView?.lineKeys ?? scoreKeys}
-            title="候选评分曲线"
-            subtitle={activeScoreView?.label}
-          />
-        </SupportPanel>
+        <div className="ml-auto flex items-center gap-2 text-erp-sm shrink-0">
+           <a href={`https://xueqiu.com/S/${symbol.replace('.', '')}`} target="_blank" rel="noreferrer" className="toolbar-btn text-erp-primary hover:underline">雪球</a>
+           <a href={`https://quote.eastmoney.com/${symbol.replace('.', '').toLowerCase()}.html`} target="_blank" rel="noreferrer" className="toolbar-btn text-erp-primary hover:underline">东方财富</a>
+        </div>
       </div>
+      
+      <div className="flex-1 overflow-y-auto bg-white flex flex-col p-6 gap-8 text-erp">
+        <QueryNotice isLoading={detailQuery.isLoading || historyQuery.isLoading} error={detailQuery.error ?? historyQuery.error} />
+        
+        {/* Core Detail Grid - Large Flat Row */}
+        <div className="flex items-center gap-12 shrink-0 border-b erp-border pb-6">
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">综合分数 / Score</span>
+            <span className="text-3xl font-mono font-bold leading-none text-erp-primary">{String(detail.score ?? '-')}</span>
+            <span className="text-[10px] text-gray-400 mt-1 uppercase font-bold">
+              {formatDate(detail.trade_date)}
+            </span>
+          </div>
+          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">模型排名 / Rank</span>
+            <span className="text-3xl font-mono font-bold leading-none text-gray-700">#{String(detail.rank ?? '-')}</span>
+            <span className="text-[10px] text-gray-400 mt-1 uppercase font-bold">
+              分位: {formatPercent(detail.rank_pct)}
+            </span>
+          </div>
+          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">预测 10D 收益</span>
+            <span className={`text-3xl font-mono font-bold leading-none ${Number(detail.ret_t1_t10) > 0 ? 'text-erp-danger' : Number(detail.ret_t1_t10) < 0 ? 'text-erp-success' : ''}`}>
+              {formatPercent(detail.ret_t1_t10)}
+            </span>
+          </div>
+          
+          <div className="flex-1 max-w-xl border-l erp-border pl-8 ml-4">
+            <div className="text-erp-primary font-bold text-xs mb-1 uppercase flex items-center gap-1">
+              <i className="ph-fill ph-chat-centered-text"></i> 操作建议摘要:
+            </div>
+            <div className="text-gray-600 text-sm leading-relaxed italic">
+              "{String(detail.action_hint ?? '暂无建议')}"
+            </div>
+          </div>
+        </div>
 
-      <SupportPanel title="操作">
-        <DetailPageNav
-          onBack={() => navigate({ pathname: '/candidates', search: location.search })}
-          prevLabel={previousSymbol}
-          onPrev={previousSymbol ? () => navigate({ pathname: buildCandidatesPath(previousSymbol), search: location.search }) : null}
-          nextLabel={nextSymbol}
-          onNext={nextSymbol ? () => navigate({ pathname: buildCandidatesPath(nextSymbol), search: location.search }) : null}
-        />
-        <div className="inline-actions inline-actions--compact">
-          <button type="button" className="button button--ghost" onClick={() => navigate(buildAiReviewPath(symbol))}>
-            查看 AI 分析
+        {/* Detail Specs & Charts */}
+        <div className="grid grid-cols-5 gap-12 shrink-0">
+           {/* Left Specs */}
+           <div className="col-span-2 flex flex-col gap-6">
+              <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3">
+                <i className="ph ph-list-numbers"></i> 交易特征与技术背景 (Technical Context)
+              </h4>
+              <div className="bg-gray-50 rounded-lg p-6 erp-border border-dashed grid grid-cols-2 gap-6">
+                 <div className="flex flex-col gap-1 border-b erp-border pb-3">
+                    <span className="text-[10px] text-gray-400 uppercase font-bold">所属行业</span>
+                    <span className="font-bold text-sm text-gray-700">{formatValue(detail.industry)}</span>
+                 </div>
+                 <div className="flex flex-col gap-1 border-b erp-border pb-3">
+                    <span className="text-[10px] text-gray-400 uppercase font-bold">当日涨跌</span>
+                    <span className={`font-mono font-bold ${Number(detail.pct_chg) > 0 ? 'text-erp-danger' : Number(detail.pct_chg) < 0 ? 'text-erp-success' : ''}`}>{formatPercent(detail.pct_chg)}</span>
+                 </div>
+                 <div className="flex flex-col gap-1">
+                    <span className="text-[10px] text-gray-400 uppercase font-bold">20日动量 (Mom_20)</span>
+                    <span className="font-mono font-bold text-gray-700">{formatPercent(detail.mom_20)}</span>
+                 </div>
+                 <div className="flex flex-col gap-1">
+                    <span className="text-[10px] text-gray-400 uppercase font-bold">距20日线 (Close_to_ma20)</span>
+                    <span className="font-mono font-bold text-gray-700">{formatPercent(detail.close_to_ma_20)}</span>
+                 </div>
+              </div>
+           </div>
+
+           {/* Right Chart */}
+           <div className="col-span-3 flex flex-col gap-6">
+              <div className="flex items-center justify-between">
+                <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3">
+                  <i className="ph ph-chart-line-up"></i> 候选评分时序曲线 (Score History)
+                </h4>
+                {scoreViewOptions.length > 0 && (
+                  <div className="flex items-center gap-1 bg-gray-100 p-1 rounded erp-border">
+                    {scoreViewOptions.map((item) => (
+                      <button
+                        key={item.key}
+                        onClick={() => setScoreView(item.key)}
+                        className={`px-3 py-1 text-[11px] rounded transition-all ${activeScoreView?.key === item.key ? 'bg-white shadow-sm font-bold text-erp-primary border erp-border' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="erp-border rounded-lg p-4 h-[350px]">
+                 <LineChartCard
+                  data={scoreHistory}
+                  xKey="trade_date"
+                  lineKeys={activeScoreView?.lineKeys ?? scoreKeys}
+                  title=""
+                  emptyText="暂无评分数据"
+                />
+              </div>
+           </div>
+        </div>
+
+      </div>
+      
+      {/* Pager Status Bar */}
+      <div className="h-8 erp-border-t bg-gray-50 flex items-center px-2 justify-between text-gray-500 text-erp-sm shrink-0">
+        <div className="flex items-center gap-4">
+          <span>数据集来源: {String(params.model).toUpperCase()} / {String(params.split).toUpperCase()}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button 
+            className="toolbar-btn" 
+            disabled={!previousSymbol} 
+            onClick={previousSymbol ? () => navigate({ pathname: buildCandidatesPath(previousSymbol), search: location.search }) : undefined}
+          >
+            <i className="ph ph-caret-left"></i> 上一只 ({previousSymbol || '-'})
           </button>
-          <button type="button" className="button button--ghost" onClick={() => navigate(buildWatchlistPath(symbol))}>
-            查看持仓
+          <span>{currentPositionLabel}</span>
+          <button 
+            className="toolbar-btn"
+            disabled={!nextSymbol}
+            onClick={nextSymbol ? () => navigate({ pathname: buildCandidatesPath(nextSymbol), search: location.search }) : undefined}
+          >
+            下一只 ({nextSymbol || '-'}) <i className="ph ph-caret-right"></i>
           </button>
         </div>
-      </SupportPanel>
+      </div>
     </div>
   )
 }

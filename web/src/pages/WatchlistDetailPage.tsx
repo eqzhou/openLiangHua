@@ -1,25 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, NavLink } from 'react-router-dom'
 
 import { apiGet, apiPost } from '../api/client'
-import { Badge } from '../components/Badge'
 import { DataTable } from '../components/DataTable'
-import { DetailPageNav } from '../components/DetailPageNav'
-import { DrawerQuickActions } from '../components/DrawerQuickActions'
-import { LineChartCard } from '../components/LineChartCard'
 import { MarkdownCard } from '../components/MarkdownCard'
-import { Panel } from '../components/Panel'
 import { QueryNotice } from '../components/QueryNotice'
-import { RealtimeStatusBanner } from '../components/RealtimeStatusBanner'
-import { SectionBlock } from '../components/SectionBlock'
-import { SpotlightCard } from '../components/SpotlightCard'
 import { useToast } from '../components/ToastProvider'
-import { WorkspaceHero } from '../components/WorkspaceHero'
 import { realtimeRefreshClient, watchlistDetailClient, watchlistPageClient, watchlistSummaryClient } from '../facades/dashboardPageClient'
 import { usePageSearchState } from '../facades/usePageSearchState'
-import { formatDateTime, formatPercent, formatValue, getFieldLabel } from '../lib/format'
-import { describeRealtimeSource, normalizeRealtimeFailedSymbols } from '../lib/realtime'
-import { buildAiReviewPath, buildCandidatesPath, buildWatchlistPath } from '../lib/shareLinks'
+import { formatPercent } from '../lib/format'
+import { describeRealtimeSource } from '../lib/realtime'
+import { buildAiReviewPath, buildWatchlistPath } from '../lib/shareLinks'
 import type { RealtimeRefreshPayload, WatchlistDetailPayload, WatchlistSummaryPayload } from '../types/api'
 
 interface WatchlistDetailPageProps {
@@ -36,13 +27,6 @@ const REDUCE_PLAN_COLUMN_LABELS = {
   plan_note: '说明',
 }
 
-function toneFromSignedNumber(value: unknown): 'default' | 'good' | 'warn' {
-  if (typeof value !== 'number' || Number.isNaN(value) || value === 0) {
-    return 'default'
-  }
-  return value > 0 ? 'good' : 'warn'
-}
-
 function buildRankLabel(rank: unknown, size: unknown, pct: unknown): string {
   if (typeof rank !== 'number' || Number.isNaN(rank)) {
     return '-'
@@ -54,24 +38,6 @@ function buildRankLabel(rank: unknown, size: unknown, pct: unknown): string {
     return `${rank} / 优于 ${formatPercent(pct)}`
   }
   return String(rank)
-}
-
-function formatDetailValue(field: string, value: unknown): string {
-  if (value === null || value === undefined || value === '') {
-    return '-'
-  }
-  if (typeof value === 'boolean') {
-    return value ? '是' : '否'
-  }
-  if (field.endsWith('_pct') || field.startsWith('mom_') || field.includes('drawdown') || field.includes('close_to_ma')) {
-    if (typeof value === 'number') {
-      return formatPercent(value)
-    }
-  }
-  if (field.endsWith('_at') || field.endsWith('_time') || field.includes('date')) {
-    return formatDateTime(value)
-  }
-  return formatValue(value)
 }
 
 export function WatchlistDetailPage({ authenticated = false }: WatchlistDetailPageProps) {
@@ -123,8 +89,6 @@ export function WatchlistDetailPage({ authenticated = false }: WatchlistDetailPa
 
   const detail = detailQuery.data?.detail ?? {}
   const realtimeStatus = summaryQuery.data?.realtimeStatus ?? {}
-  const failedSymbols = normalizeRealtimeFailedSymbols(realtimeStatus.failed_symbols)
-  const detailFieldRows = Object.entries(detail).map(([field, value]) => ({ field: getFieldLabel(field), value: formatDetailValue(field, value) }))
   const records = summaryQuery.data?.records ?? []
   const recordSymbols = records.map((row) => String(row.ts_code ?? '')).filter(Boolean)
   const currentIndex = recordSymbols.findIndex((item: string) => item === symbol)
@@ -133,108 +97,165 @@ export function WatchlistDetailPage({ authenticated = false }: WatchlistDetailPa
   const currentPositionLabel = currentIndex >= 0 ? `${currentIndex + 1} / ${recordSymbols.length}` : '-'
 
   return (
-    <div className="page-stack">
-      <WorkspaceHero
-        title="持仓详情"
-        eyebrow="持仓 / 详情"
-        badges={
-          <>
-            <Badge tone="brand">{String(detail.ts_code ?? symbol)}</Badge>
-            <Badge tone={detail.is_watch_only ? 'warn' : 'good'}>{detail.is_watch_only ? '仅观察' : '持仓中'}</Badge>
-            <Badge>{`序号 ${currentPositionLabel}`}</Badge>
-          </>
-        }
-      />
+    <div className="flex-1 flex flex-col overflow-hidden text-erp bg-erp-bg">
+      {/* Top Header Row for Detail */}
+      <div className="h-10 bg-white erp-border-b flex items-center px-3 gap-3 shrink-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
+        <NavLink to={`/watchlist${location.search}`} className="toolbar-btn shrink-0">
+          <i className="ph ph-arrow-left text-erp-primary"></i> 返回列表
+        </NavLink>
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+        <span className="font-bold text-gray-700 mr-2 flex items-center gap-2 shrink-0">
+          <i className="ph-fill ph-target text-erp-danger"></i>
+          {String(detail.name || symbol)} ({symbol})
+        </span>
+        <span className={`px-1.5 py-0.5 text-erp-sm border rounded shrink-0 ${detail.is_watch_only ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+          {detail.is_watch_only ? '仅观察' : '持仓中'}
+        </span>
+        <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-erp-sm border border-gray-200 rounded shrink-0">
+          {String(detail.entry_group ?? '观察池')}
+        </span>
+        <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-erp-sm border border-gray-200 rounded shrink-0">
+          序号 {currentPositionLabel}
+        </span>
 
-      <Panel title="详情" tone="warm" className="panel--summary-surface">
-        <QueryNotice isLoading={summaryQuery.isLoading || detailQuery.isLoading} error={summaryQuery.error ?? detailQuery.error} />
-        <RealtimeStatusBanner
-          title="盘中行情刷新状态"
-          status={realtimeStatus}
-          isRefreshing={refreshRealtimeMutation.isPending}
-          error={refreshRealtimeMutation.isError ? refreshRealtimeMutation.error : undefined}
-          onRefresh={() => refreshRealtimeMutation.mutate()}
-          onRetryFailed={() => refreshRealtimeMutation.mutate()}
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+
+        {/* Action Buttons in Toolbar */}
+        <button 
+          className={`toolbar-btn shrink-0 ${refreshRealtimeMutation.isPending ? 'disabled' : ''}`}
+          onClick={() => refreshRealtimeMutation.mutate()}
           disabled={!authenticated || refreshRealtimeMutation.isPending}
-        />
-        {Object.keys(detail).length ? (
-          <SectionBlock title="交易席位" tone="emphasis">
-            <SpotlightCard
-              title={String(detail.name ?? '-')}
-              meta={String(detail.ts_code ?? '')}
-              subtitle={String(detail.llm_latest_summary ?? detail.premarket_plan ?? detail.action_brief ?? detail.watch_level ?? '暂无概览')}
-              badges={[
-                { label: String(detail.entry_group ?? '观察池'), tone: 'brand' },
-                detail.source_category ? { label: String(detail.source_category), tone: 'brand' } : null,
-                detail.is_overlay_selected ? { label: '历史精选', tone: 'good' } : null,
-                detail.is_inference_overlay_selected ? { label: '最新推理', tone: 'good' } : null,
-              ].filter(Boolean) as Array<{ label: string; tone?: 'default' | 'brand' | 'good' | 'warn' }>}
-              metrics={[
-                { label: '参考价', value: detail.mark_price ?? '-' },
-                { label: '最新价', value: detail.realtime_price ?? '-', helper: `${describeRealtimeSource(detail.realtime_quote_source ?? realtimeStatus.source).label} / ${formatDateTime(detail.realtime_time ?? realtimeStatus.fetched_at)}` },
-                { label: '盘中涨跌', value: formatPercent(detail.realtime_pct_chg), tone: toneFromSignedNumber(detail.realtime_pct_chg) },
-                { label: '历史验证排名', value: buildRankLabel(detail.ensemble_rank, detail.universe_size, detail.ensemble_rank_pct) },
-                { label: '最新推理排名', value: buildRankLabel(detail.inference_ensemble_rank, null, detail.inference_ensemble_rank_pct) },
-                { label: '解套价', value: detail.breakeven_price ?? '-' },
-              ]}
-            />
-          </SectionBlock>
-        ) : null}
-      </Panel>
+        >
+          <i className={`ph ph-arrows-clockwise ${refreshRealtimeMutation.isPending ? 'animate-spin' : 'text-erp-success'}`}></i> 
+          刷新盘中行情
+        </button>
 
-      <DetailPageNav
-        onBack={() => navigate({ pathname: '/watchlist', search: location.search })}
-        prevLabel={previousSymbol}
-        onPrev={previousSymbol ? () => navigate({ pathname: buildWatchlistPath(previousSymbol), search: location.search }) : null}
-        nextLabel={nextSymbol}
-        onNext={nextSymbol ? () => navigate({ pathname: buildWatchlistPath(nextSymbol), search: location.search }) : null}
-      />
+        <button 
+          className={`toolbar-btn shrink-0 ${generateWatchPlanMutation.isPending ? 'disabled' : ''}`}
+          onClick={() => generateWatchPlanMutation.mutate()}
+          disabled={!authenticated || generateWatchPlanMutation.isPending}
+        >
+          <i className="ph ph-file-text"></i> 生成盯盘清单
+        </button>
+        <button 
+          className={`toolbar-btn shrink-0 ${generateActionMemoMutation.isPending ? 'disabled' : ''}`}
+          onClick={() => generateActionMemoMutation.mutate()}
+          disabled={!authenticated || generateActionMemoMutation.isPending}
+        >
+          <i className="ph ph-note"></i> 生成操作备忘
+        </button>
+        <button className="toolbar-btn shrink-0" onClick={() => navigate(buildAiReviewPath(symbol))}>
+          <i className="ph ph-brain text-erp-primary"></i> AI 分析
+        </button>
 
-      <DrawerQuickActions
-        title="详情操作"
-        meta={String(detail.ts_code ?? symbol)}
-        primaryActions={[
-          { key: 'generate-watch-plan', label: generateWatchPlanMutation.isPending ? '生成中...' : '生成盯盘清单', onClick: () => generateWatchPlanMutation.mutate(), disabled: !authenticated || generateWatchPlanMutation.isPending },
-          { key: 'generate-action-memo', label: generateActionMemoMutation.isPending ? '生成中...' : '生成操作备忘', onClick: () => generateActionMemoMutation.mutate(), disabled: !authenticated || generateActionMemoMutation.isPending },
-        ]}
-        secondaryActions={[
-          { key: 'open-ai-review', label: '查看 AI 分析', onClick: () => navigate(buildAiReviewPath(symbol)) , tone: 'ghost' },
-          { key: 'open-candidates', label: '查看候选', onClick: () => navigate(buildCandidatesPath(symbol)), tone: 'ghost' },
-        ]}
-      />
-
-      <div className="split-layout">
-        <Panel title="计划" tone="calm" className="panel--summary-surface">
-          <DataTable rows={detailQuery.data?.reducePlan ?? []} columnLabels={REDUCE_PLAN_COLUMN_LABELS} storageKey="watchlist-reduce-plan" emptyText="暂无计划表" />
-        </Panel>
-        <Panel title="历史" tone="calm" className="panel--summary-surface">
-          <LineChartCard data={detailQuery.data?.history ?? []} xKey="trade_date" lineKeys={['score']} title="历史评分曲线" />
-        </Panel>
+        <div className="ml-auto flex items-center gap-2 text-erp-sm shrink-0">           <a href={`https://xueqiu.com/S/${symbol.replace('.', '')}`} target="_blank" rel="noreferrer" className="toolbar-btn text-erp-primary hover:underline">
+             雪球
+           </a>
+           <a href={`https://quote.eastmoney.com/${symbol.replace('.', '').toLowerCase()}.html`} target="_blank" rel="noreferrer" className="toolbar-btn text-erp-primary hover:underline">
+             东方财富
+           </a>
+        </div>
       </div>
 
-      <div className="split-layout">
-        <Panel title="AI 研讨" tone="calm" className="panel--summary-surface">
-          <DataTable rows={detailQuery.data?.discussionRows ?? []} storageKey="watchlist-discussion" emptyText="暂无 AI 研讨记录" />
-        </Panel>
-        <Panel title="价格与研究备注" tone="calm" className="panel--summary-surface">
-          <DataTable rows={detailFieldRows} columns={['field', 'value']} storageKey="watchlist-detail-fields" emptyText="暂无详情字段" enableColumnManager={false} />
-        </Panel>
+      <div className="flex-1 overflow-y-auto bg-white flex flex-col p-6 gap-8 text-erp">
+        <QueryNotice isLoading={summaryQuery.isLoading || detailQuery.isLoading} error={summaryQuery.error ?? detailQuery.error} />
+        
+        {/* Core Detail Grid - Large Flat Row */}
+        <div className="flex items-center gap-12 shrink-0 border-b erp-border pb-6">
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">参考价 / Mark Price</span>
+            <span className="text-3xl font-mono font-bold leading-none text-gray-700">{String(detail.mark_price ?? '-')}</span>
+          </div>
+          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">最新价 / Last Price</span>
+            <span className="text-3xl font-mono font-bold leading-none">{String(detail.realtime_price ?? '-')}</span>
+            <span className="text-[10px] text-gray-400 mt-1 uppercase">
+              {describeRealtimeSource(detail.realtime_quote_source ?? realtimeStatus.source).label}
+            </span>
+          </div>
+          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">盘中涨跌</span>
+            <span className={`text-3xl font-mono font-bold leading-none ${Number(detail.realtime_pct_chg) > 0 ? 'text-erp-danger' : Number(detail.realtime_pct_chg) < 0 ? 'text-erp-success' : ''}`}>
+              {formatPercent(detail.realtime_pct_chg)}
+            </span>
+          </div>
+          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">解套价</span>
+            <span className="text-3xl font-mono font-bold leading-none text-gray-400">{String(detail.breakeven_price ?? '-')}</span>
+          </div>
+          
+          <div className="flex-1 max-w-xl border-l erp-border pl-8 ml-4">
+            <div className="text-erp-primary font-bold text-xs mb-1 uppercase flex items-center gap-1">
+              <i className="ph-fill ph-chat-centered-text"></i> AI 交易员策略简述:
+            </div>
+            <div className="text-gray-600 text-sm leading-relaxed italic">
+              "{String(detail.llm_latest_summary ?? detail.premarket_plan ?? detail.action_brief ?? detail.watch_level ?? '暂无概览')}"
+            </div>
+          </div>
+        </div>
+
+        {/* Action Plans & Memorandums */}
+        <section className="grid grid-cols-2 gap-12 pt-4">
+           <div className="flex flex-col gap-4">
+              <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3">
+                <i className="ph ph-notebook"></i> 交易计划与备忘
+              </h4>
+              <div className="bg-yellow-50/40 rounded-lg p-6 erp-border border-dashed flex flex-col gap-4 min-h-[250px]">
+                 <div className="text-sm font-bold text-yellow-800">最新盯盘提醒:</div>
+                 <div className="text-sm leading-relaxed text-gray-700">
+                    <MarkdownCard title="" content={String(detailQuery.data?.watchPlan?.content || detailQuery.data?.actionMemo?.content || '*未生成盯盘备忘*')} />
+                 </div>
+              </div>
+           </div>
+
+           <div className="flex flex-col gap-4">
+              <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3">
+                <i className="ph ph-list-numbers"></i> 减仓阶梯参考
+              </h4>
+              <div className="erp-border rounded-lg overflow-hidden h-[250px]">
+                 <DataTable rows={detailQuery.data?.reducePlan ?? []} columnLabels={REDUCE_PLAN_COLUMN_LABELS} storageKey="watchlist-reduce-plan" emptyText="暂无计划表" />
+              </div>
+           </div>
+        </section>
+
+        {/* Discussion History */}
+        <section className="border-t erp-border pt-8">
+           <h4 className="text-gray-400 font-bold text-xs uppercase tracking-widest mb-6 flex items-center gap-2">
+             <i className="ph ph-chat-circle-text"></i> 策略研讨历史纪录 (Discussion History)
+           </h4>
+           <div className="erp-border rounded-lg overflow-hidden min-h-[300px]">
+              <DataTable rows={detailQuery.data?.discussionRows ?? []} storageKey="watchlist-discussion" emptyText="暂无研讨记录" />
+           </div>
+        </section>
       </div>
 
-      <div className="split-layout">
-        <Panel title="AI Shortlist" tone="calm" className="panel--summary-surface">
-          <MarkdownCard title="交易员可读 Shortlist" content={detailQuery.data?.latestAiShortlist} />
-        </Panel>
-        <Panel title="盯盘与备忘" tone="calm" className="panel--summary-surface">
-          <SectionBlock title="最新盯盘清单" collapsible defaultExpanded={false}>
-            <MarkdownCard title="盯盘清单" content={String(detailQuery.data?.watchPlan?.content ?? '')} />
-          </SectionBlock>
-          <SectionBlock title="最新操作备忘" collapsible defaultExpanded={false}>
-            <MarkdownCard title="操作备忘" content={String(detailQuery.data?.actionMemo?.content ?? '')} />
-          </SectionBlock>
-          {failedSymbols.length ? <div className="query-notice query-notice--warn">{`快照失败股票：${failedSymbols.join(' / ')}`}</div> : null}
-        </Panel>
+      {/* Pager Status Bar */}
+      <div className="h-8 erp-border-t bg-gray-50 flex items-center px-2 justify-between text-gray-500 text-erp-sm shrink-0">
+        <div className="flex items-center gap-4">
+          <span>历史验证排名: {buildRankLabel(detail.ensemble_rank, detail.universe_size, detail.ensemble_rank_pct)}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button 
+            className="toolbar-btn" 
+            disabled={!previousSymbol} 
+            onClick={previousSymbol ? () => navigate({ pathname: buildWatchlistPath(previousSymbol), search: location.search }) : undefined}
+          >
+            <i className="ph ph-caret-left"></i> 上一只 ({previousSymbol || '-'})
+          </button>
+          <span>{currentPositionLabel}</span>
+          <button 
+            className="toolbar-btn"
+            disabled={!nextSymbol}
+            onClick={nextSymbol ? () => navigate({ pathname: buildWatchlistPath(nextSymbol), search: location.search }) : undefined}
+          >
+            下一只 ({nextSymbol || '-'}) <i className="ph ph-caret-right"></i>
+          </button>
+        </div>
       </div>
+
     </div>
   )
 }

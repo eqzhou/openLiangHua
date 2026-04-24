@@ -2,20 +2,12 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { apiGet, apiPost } from '../api/client'
-import { Badge } from '../components/Badge'
-import { MetricCard } from '../components/MetricCard'
-import { Panel } from '../components/Panel'
-import { PropertyGrid } from '../components/PropertyGrid'
 import { QueryNotice } from '../components/QueryNotice'
-import { SectionBlock } from '../components/SectionBlock'
-import { SpotlightCard } from '../components/SpotlightCard'
-import { SupportPanel } from '../components/SupportPanel'
 import { useToast } from '../components/ToastProvider'
-import { WorkspaceHero } from '../components/WorkspaceHero'
 import { dataManagementClient } from '../facades/dashboardPageClient'
-import { formatDateTime, formatValue } from '../lib/format'
+import { formatValue } from '../lib/format'
 import { DATA_MANAGEMENT_REFETCH_INTERVAL_MS } from '../lib/polling'
-import type { ActionResult, DataArtifactStatus, DataManagementPayload } from '../types/api'
+import type { ActionResult, DataManagementPayload } from '../types/api'
 
 interface DataManagementPageProps {
   authenticated?: boolean
@@ -26,15 +18,6 @@ function toErrorMessage(error: unknown): string {
     return error.message.trim()
   }
   return '操作失败，请稍后再试。'
-}
-
-function buildArtifactMetrics(status: DataArtifactStatus) {
-  return [
-    { label: '最新日期', value: status.latestTradeDate ?? '-' },
-    { label: '行数', value: status.rowCount ?? 0 },
-    { label: '股票数', value: status.symbolCount ?? 0 },
-    { label: '更新时间', value: formatDateTime(status.updatedAt) },
-  ]
 }
 
 export function DataManagementPage({ authenticated = false }: DataManagementPageProps) {
@@ -49,19 +32,20 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
     refetchInterval: DATA_MANAGEMENT_REFETCH_INTERVAL_MS,
   })
 
+  const payload = dataQuery.data
   const incrementalRefreshMutation = useMutation({
     mutationFn: () =>
       apiPost<ActionResult>(dataManagementClient.incrementalActionPath(), {
         target_source: payload?.targetSource ?? 'tushare',
         end_date: endDate || undefined,
       }),
-    onSuccess: (payload) => {
-      setLatestAction(payload)
+    onSuccess: (actionPayload) => {
+      setLatestAction(actionPayload)
       void queryClient.invalidateQueries()
       pushToast({
-        tone: payload.ok ? 'success' : 'error',
-        title: payload.label ?? 'Tushare 增量刷新',
-        description: payload.output,
+        tone: actionPayload.ok ? 'success' : 'error',
+        title: actionPayload.label ?? 'Tushare 增量刷新',
+        description: actionPayload.output,
       })
     },
     onError: (error) => {
@@ -79,13 +63,13 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
         target_source: payload?.targetSource ?? 'tushare',
         end_date: endDate || undefined,
       }),
-    onSuccess: (payload) => {
-      setLatestAction(payload)
+    onSuccess: (actionPayload) => {
+      setLatestAction(actionPayload)
       void queryClient.invalidateQueries()
       pushToast({
-        tone: payload.ok ? 'success' : 'error',
-        title: payload.label ?? 'Tushare 全流程刷新',
-        description: payload.output,
+        tone: actionPayload.ok ? 'success' : 'error',
+        title: actionPayload.label ?? 'Tushare 全流程刷新',
+        description: actionPayload.output,
       })
     },
     onError: (error) => {
@@ -97,11 +81,9 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
     },
   })
 
-  const payload = dataQuery.data
   const dailyBar = payload?.dailyBar ?? { exists: false, rowCount: 0, symbolCount: 0 }
   const researchPanel = payload?.researchPanel ?? { exists: false, rowCount: 0, symbolCount: 0 }
   const legacyFeatureView = payload?.legacyFeatureView ?? { exists: false, rowCount: 0, symbolCount: 0 }
-  const legacyLabelView = payload?.legacyLabelView ?? { exists: false, rowCount: 0, symbolCount: 0 }
   const datasetSummary = (payload?.datasetSummary ?? {}) as Record<string, unknown>
   const tokenConfigured = payload?.tokenConfigured ?? null
   const hasToken = tokenConfigured === true
@@ -112,154 +94,196 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
   const sourceMismatch = payload?.sourceMismatch ?? false
   const pendingAction = incrementalRefreshMutation.isPending ? 'incremental' : fullRefreshMutation.isPending ? 'full' : null
 
-  const heroBadges = (
-    <>
-      <Badge tone={tokenConfigured === null ? 'default' : hasToken ? 'good' : 'warn'}>{`Token ${tokenStatusLabel}`}</Badge>
-      <Badge tone="brand">{`当前源 ${actualSource}`}</Badge>
-      {sourceMismatch ? <Badge tone="warn">{`配置源 ${configuredSource}`}</Badge> : null}
-      <Badge tone={authenticated ? 'good' : 'default'}>{authenticated ? '可执行' : '只读'}</Badge>
-    </>
-  )
-
   return (
-    <div className="page-stack">
-      <WorkspaceHero title="数据管理" badges={heroBadges} />
+    <div className="flex-1 flex flex-col overflow-hidden text-erp bg-erp-bg">
+      {/* Local Toolbar */}
+      <div className="h-10 bg-white erp-border-b flex items-center px-3 gap-3 shrink-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
+        <span className="font-bold text-gray-700 mr-2 flex items-center gap-2 shrink-0">
+          <i className="ph-fill ph-database text-erp-primary"></i> 
+          数据管理 (Data Management)
+        </span>
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+        
+        {/* State Indicators */}
+        <div className="flex items-center gap-3 text-erp-sm shrink-0">
+           <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded border ${tokenConfigured === null ? 'bg-gray-100 text-gray-500 border-gray-200' : hasToken ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+              <div className={`w-2 h-2 rounded-full ${hasToken ? 'bg-erp-success' : 'bg-gray-400'}`}></div>
+              <span className="font-bold uppercase tracking-wider">TOKEN: {tokenStatusLabel}</span>
+           </div>
+           <div className="flex items-center gap-1">
+             <span className="text-gray-400 font-mono">| SOURCE:</span>
+             <span className="font-bold text-erp-primary">{actualSource.toUpperCase()}</span>
+           </div>
+           {sourceMismatch && (
+             <div className="flex items-center gap-1 text-erp-warning">
+               <i className="ph-fill ph-warning"></i>
+               <span className="font-bold">MISMATCH ({configuredSource.toUpperCase()})</span>
+             </div>
+           )}
+        </div>
 
-      <div className="metric-grid metric-grid--four">
-        <MetricCard
-          label="Token 状态"
-          value={tokenStatusLabel}
-          tone={tokenConfigured === null ? 'default' : hasToken ? 'good' : 'warn'}
-          helper={authenticated ? (payload?.envFileExists ? '检测到 .env' : '未发现 .env') : '登录后显示'}
-        />
-        <MetricCard label="日线最新日期" value={dailyBar.latestTradeDate ?? '-'} tone={dailyBar.exists ? 'good' : 'warn'} />
-        <MetricCard label="研究面板最新日期" value={researchPanel.latestTradeDate ?? '-'} tone={researchPanel.exists ? 'good' : 'warn'} />
-        <MetricCard label="研究面板股票数" value={researchPanel.symbolCount ?? 0} tone={researchPanel.exists ? 'good' : 'warn'} />
+        <div className="ml-auto flex items-center gap-4 text-erp-sm shrink-0">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">日线最新:</span> 
+            <span className={`font-bold font-mono ${dailyBar.exists ? 'text-erp-success' : 'text-erp-warning'}`}>{dailyBar.latestTradeDate ?? '-'}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">特征面板:</span> 
+            <span className={`font-bold font-mono ${researchPanel.exists ? 'text-erp-success' : 'text-erp-warning'}`}>{researchPanel.latestTradeDate ?? '-'}</span>
+          </div>
+        </div>
       </div>
 
-      <Panel title="状态" tone="warm" className="panel--summary-surface">
+      <div className="flex-1 overflow-y-auto bg-erp-bg p-2 flex flex-col gap-2">
         <QueryNotice isLoading={dataQuery.isLoading} error={dataQuery.error} />
-        {!authenticated ? <div className="query-notice query-notice--info">当前只读，可查看数据状态；如需执行刷新，请先登录。</div> : null}
-        {authenticated && tokenConfigured === false ? <div className="query-notice query-notice--error">当前未检测到 `TUSHARE_TOKEN`，请先更新 `.env` 或运行环境变量。</div> : null}
-        {sourceMismatch ? (
-          <div className="query-notice query-notice--warn">{`当前实际落地数据源为 ${actualSource}，但配置文件仍指向 ${configuredSource}。系统已优先读取真实落地产物，建议后续统一配置与产物来源。`}</div>
-        ) : null}
-
-        <SectionBlock title="当前数据结论">
-          <SpotlightCard
-            title="本地研究数据状态"
-            meta={`当前源 ${actualSource}`}
-            subtitle={`日线最新日期 ${dailyBar.latestTradeDate ?? '-'}，研究面板最新日期 ${researchPanel.latestTradeDate ?? '-'}。`}
-            metrics={[
-              { label: '日线行数', value: dailyBar.rowCount ?? 0, tone: dailyBar.exists ? 'good' : 'warn' },
-              { label: '研究面板行数', value: researchPanel.rowCount ?? 0, tone: researchPanel.exists ? 'good' : 'warn' },
-              { label: '研究面板股票数', value: researchPanel.symbolCount ?? 0, tone: researchPanel.exists ? 'good' : 'warn' },
-              { label: '缓存股票数', value: formatValue(datasetSummary.cached_symbols ?? 0) },
-            ]}
-          />
-        </SectionBlock>
-
-        <SectionBlock title="环境信息" tone="muted">
-          <PropertyGrid
-            items={[
-              { label: '.env 路径', value: payload?.envPath ?? '登录后可见', span: 'double' },
-              { label: '.env 存在', value: payload?.envFileExists ?? false, tone: payload?.envFileExists ? 'good' : 'warn' },
-              { label: 'Tushare Token', value: tokenStatusLabel, tone: tokenConfigured === null ? 'default' : hasToken ? 'good' : 'warn' },
-              { label: '当前落地源', value: actualSource },
-              { label: '配置数据源', value: configuredSource, tone: sourceMismatch ? 'warn' : 'default' },
-              { label: '今日日期', value: payload?.today ?? '-' },
-              { label: '研究区间', value: `${formatValue(datasetSummary.date_min)} 至 ${formatValue(datasetSummary.date_max)}`, span: 'double' },
-            ]}
-          />
-        </SectionBlock>
-      </Panel>
-
-      <Panel title="执行" tone="calm" className="panel--table-surface">
-        <div className="split-layout split-layout--workspace">
-          <SectionBlock title="刷新控制">
-            <form
-              className="config-form"
-              onSubmit={(event) => {
-                event.preventDefault()
-              }}
-            >
-              <label>
-                <span>目标数据源</span>
-                <input value={targetSource} disabled />
-              </label>
-              <label>
-                <span>截止日期</span>
-                <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} placeholder={payload?.today ?? ''} />
-              </label>
-              <div className="inline-actions inline-actions--compact">
-                <button
-                  type="button"
-                  className="button button--primary"
-                  disabled={!authenticated || tokenConfigured !== true || pendingAction !== null}
-                  onClick={() => incrementalRefreshMutation.mutate()}
-                >
-                  {pendingAction === 'incremental' ? '增量刷新中...' : 'Tushare 增量刷新日线'}
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  disabled={!authenticated || tokenConfigured !== true || pendingAction !== null}
-                  onClick={() => fullRefreshMutation.mutate()}
-                >
-                  {pendingAction === 'full' ? '全流程刷新中...' : 'Tushare 全流程刷新'}
-                </button>
-              </div>
-            </form>
-          </SectionBlock>
-
-          <SectionBlock title="最近一次执行结果">
-            {latestAction ? (
-              <SpotlightCard
-                title={latestAction.ok ? '执行完成' : '执行失败'}
-                meta={latestAction.label ?? latestAction.actionName}
-                subtitle={latestAction.output}
-                metrics={[
-                  { label: '动作名称', value: latestAction.actionName },
-                  { label: '执行状态', value: latestAction.ok ? '完成' : '失败', tone: latestAction.ok ? 'good' : 'warn' },
-                ]}
-              />
-            ) : (
-              <div className="empty-state">还没有执行过数据刷新动作。</div>
-            )}
-          </SectionBlock>
+        
+        {/* Top Summary Row */}
+        <div className="flex bg-white erp-border shrink-0">
+          <div className="flex-1 p-3 flex flex-col justify-center border-r erp-border">
+            <div className="text-gray-500 text-[10px] uppercase font-bold tracking-widest mb-1">今日日期 (Today)</div>
+            <div className="text-xl font-mono font-bold text-erp-primary">{String(payload?.today ?? '-')}</div>
+          </div>
+          <div className="flex-1 p-3 flex flex-col justify-center border-r erp-border">
+            <div className="text-gray-500 text-[10px] uppercase font-bold tracking-widest mb-1">日线覆盖 (Daily Bar)</div>
+            <div className="text-xl font-mono font-bold">{formatValue(dailyBar.symbolCount ?? 0)} 只</div>
+            <div className="text-[10px] text-gray-400 mt-1 uppercase">{formatValue(dailyBar.rowCount ?? 0)} 条记录</div>
+          </div>
+          <div className="flex-1 p-3 flex flex-col justify-center border-r erp-border">
+            <div className="text-gray-500 text-[10px] uppercase font-bold tracking-widest mb-1">研究面板 (Research Panel)</div>
+            <div className="text-xl font-mono font-bold">{formatValue(researchPanel.symbolCount ?? 0)} 只</div>
+            <div className="text-[10px] text-gray-400 mt-1 uppercase">{formatValue(researchPanel.rowCount ?? 0)} 条记录</div>
+          </div>
+          <div className="flex-1 p-3 flex flex-col justify-center">
+            <div className="text-gray-500 text-[10px] uppercase font-bold tracking-widest mb-1">缓存快照 (Cache)</div>
+            <div className="text-xl font-mono font-bold">{formatValue(datasetSummary.cached_symbols ?? 0)} 只</div>
+            <div className="text-[10px] text-gray-400 mt-1 uppercase">研究区间 {String(datasetSummary.date_min ?? '-')} 至 {String(datasetSummary.date_max ?? '-')}</div>
+          </div>
         </div>
-      </Panel>
 
-      <div className="split-layout">
-        <SupportPanel title="数据文件">
-          <SectionBlock title="日线面板" tone="muted">
-            <PropertyGrid items={buildArtifactMetrics(dailyBar)} />
-          </SectionBlock>
-          <SectionBlock title="研究面板" tone="muted">
-            <PropertyGrid items={buildArtifactMetrics(researchPanel)} />
-          </SectionBlock>
-          <SectionBlock title="旧特征兼容视图" tone="muted" collapsible defaultExpanded={false}>
-            <PropertyGrid items={buildArtifactMetrics(legacyFeatureView)} />
-          </SectionBlock>
-          <SectionBlock title="旧标签兼容视图" tone="muted" collapsible defaultExpanded={false}>
-            <PropertyGrid items={buildArtifactMetrics(legacyLabelView)} />
-          </SectionBlock>
-        </SupportPanel>
+        {/* Warning Banners */}
+        {(!authenticated || tokenConfigured === false || sourceMismatch) && (
+          <div className="flex flex-col gap-2 shrink-0">
+            {!authenticated && <div className="p-3 bg-blue-50/20 border border-blue-100 rounded text-blue-600 text-sm flex items-center gap-2"><i className="ph-fill ph-info"></i> 当前只读，可查看数据状态；如需执行刷新，请先登录系统。</div>}
+            {authenticated && tokenConfigured === false && <div className="p-3 bg-red-50/20 border border-red-100 rounded text-erp-danger text-sm flex items-center gap-2"><i className="ph-fill ph-warning"></i> 当前未检测到 TUSHARE_TOKEN，请先更新 .env 配置文件或设置环境变量。</div>}
+            {sourceMismatch && <div className="p-3 bg-yellow-50/20 border border-yellow-100 rounded text-yellow-700 text-sm flex items-center gap-2"><i className="ph-fill ph-warning"></i> 当前实际落地数据源为 {actualSource}，但配置文件仍指向 {configuredSource}。系统已优先读取真实落地产物。</div>}
+          </div>
+        )}
 
-        <SupportPanel title="脚本">
-          <SectionBlock title="手工命令" tone="muted">
-            <pre className="log-block">{`powershell -ExecutionPolicy Bypass -File .\\scripts\\refresh_daily_bar_tushare.ps1 -TargetSource ${targetSource}${endDate ? ` -EndDate ${endDate}` : ''}`}</pre>
-            <pre className="log-block">{`powershell -ExecutionPolicy Bypass -File .\\scripts\\refresh_full_pipeline_tushare.ps1 -TargetSource ${targetSource}${endDate ? ` -EndDate ${endDate}` : ''}`}</pre>
-          </SectionBlock>
-          <SectionBlock title="脚本路径" tone="muted" collapsible defaultExpanded={false}>
-            <PropertyGrid
-              items={[
-                { label: '增量脚本', value: payload?.scripts.incremental ?? '-', span: 'double' },
-                { label: '全流程脚本', value: payload?.scripts.fullRefresh ?? '-', span: 'double' },
-              ]}
-            />
-          </SectionBlock>
-        </SupportPanel>
+        {/* Middle Two-Column Grid: Execution & Logs */}
+        <div className="flex flex-1 gap-2 min-h-[400px]">
+           {/* Left: Execution Form */}
+           <div className="w-[450px] flex flex-col gap-2 shrink-0">
+              <div className="flex-1 bg-white erp-border flex flex-col overflow-hidden">
+                 <div className="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700 shrink-0">
+                   01. 数据流刷新控制 (Data Pipeline)
+                 </div>
+                 <div className="p-5 flex flex-col gap-6">
+                    <div className="flex flex-col gap-4">
+                       <div className="flex flex-col gap-1.5">
+                          <label className="text-gray-500 font-bold uppercase text-[10px] tracking-wider">目标数据源 (Target Source)</label>
+                          <input value={targetSource} disabled className="erp-border rounded px-2 h-8 bg-gray-100 text-gray-500 outline-none cursor-not-allowed font-mono uppercase" />
+                       </div>
+                       <div className="flex flex-col gap-1.5">
+                          <label className="text-gray-500 font-bold uppercase text-[10px] tracking-wider">截止日期 (End Date) - 留空默认为今日</label>
+                          <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} 
+                                 className="erp-border rounded px-2 h-8 bg-gray-50 focus:bg-white focus:ring-1 focus:ring-erp-primary outline-none transition-all" />
+                       </div>
+                    </div>
+                    
+                    <div className="flex flex-col gap-3 pt-6 border-t erp-border">
+                       <button
+                         type="button"
+                         className={`w-full h-9 flex items-center justify-center gap-2 rounded font-bold text-white transition-all shadow-sm ${!authenticated || tokenConfigured !== true || pendingAction !== null ? 'bg-gray-300 cursor-not-allowed' : 'bg-erp-primary hover:bg-erp-primary-hover active:scale-[0.98]'}`}
+                         disabled={!authenticated || tokenConfigured !== true || pendingAction !== null}
+                         onClick={() => incrementalRefreshMutation.mutate()}
+                       >
+                         {pendingAction === 'incremental' ? <><i className="ph ph-spinner animate-spin"></i> 增量刷新中...</> : <><i className="ph ph-fast-forward-circle"></i> Tushare 增量同步日线 (Incremental)</>}
+                       </button>
+                       <button
+                         type="button"
+                         className={`w-full h-9 flex items-center justify-center gap-2 rounded font-bold transition-all shadow-sm ${!authenticated || tokenConfigured !== true || pendingAction !== null ? 'bg-gray-100 text-gray-400 cursor-not-allowed erp-border' : 'bg-white erp-border hover:bg-gray-50 active:scale-[0.98] text-gray-700'}`}
+                         disabled={!authenticated || tokenConfigured !== true || pendingAction !== null}
+                         onClick={() => fullRefreshMutation.mutate()}
+                       >
+                         {pendingAction === 'full' ? <><i className="ph ph-spinner animate-spin"></i> 全流程刷新中...</> : <><i className="ph ph-database"></i> Tushare 全流程重建 (Full Pipeline)</>}
+                       </button>
+                    </div>
+                 </div>
+              </div>
+
+              {/* Status block below form */}
+              <div className="h-[120px] bg-white erp-border flex flex-col overflow-hidden shrink-0">
+                 <div className="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700 shrink-0">
+                   数据文件体积核查 (File Sizes)
+                 </div>
+                 <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2 text-[11px] font-mono text-gray-600 bg-gray-50/50">
+                    <div className="flex justify-between border-b erp-border pb-1">
+                      <span>日线面板 (daily_bar)</span>
+                      <span className="font-bold">{String((dailyBar as unknown as Record<string, unknown>).size_mb ?? '-')} MB</span>
+                    </div>
+                    <div className="flex justify-between border-b erp-border pb-1">
+                      <span>研究面板 (research_panel)</span>
+                      <span className="font-bold">{String((researchPanel as unknown as Record<string, unknown>).size_mb ?? '-')} MB</span>
+                    </div>
+                    <div className="flex justify-between pb-1 text-gray-400">
+                      <span>旧特征视图 (features)</span>
+                      <span>{String((legacyFeatureView as unknown as Record<string, unknown>).size_mb ?? '-')} MB</span>
+                    </div>
+                 </div>
+              </div>
+           </div>
+
+           {/* Right: Logs & Scripts Console */}
+           <div className="flex-1 flex flex-col gap-2">
+              <div className="flex-[2] bg-white erp-border flex flex-col overflow-hidden">
+                 <div className="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700 shrink-0 justify-between">
+                   <span>02. 刷新任务控制台日志 (Pipeline Console)</span>
+                   <span className="text-[10px] text-gray-400 font-mono tracking-wider">STDOUT / STDERR</span>
+                 </div>
+                 <div className="flex-1 bg-[#020617] overflow-y-auto p-4 custom-scrollbar">
+                   {latestAction ? (
+                     <div className="flex flex-col gap-4">
+                        <div className="flex items-center gap-4 border-b border-white/10 pb-3">
+                           <span className={`text-xs px-2 py-0.5 rounded font-bold ${latestAction.ok ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                             {latestAction.ok ? 'SUCCESS' : 'FAILED'}
+                           </span>
+                           <span className="text-white font-mono text-sm uppercase tracking-wider">{latestAction.label || latestAction.actionName}</span>
+                        </div>
+                        <pre className="font-mono text-[12px] text-gray-300 leading-relaxed whitespace-pre-wrap">
+                          {latestAction.output || '> (Empty output received from server)'}
+                        </pre>
+                     </div>
+                   ) : (
+                     <div className="h-full flex flex-col items-center justify-center gap-4 opacity-30 grayscale">
+                        <i className="ph ph-terminal-window text-5xl text-white"></i>
+                        <span className="text-white font-mono text-sm uppercase tracking-widest italic">Waiting for pipeline trigger...</span>
+                     </div>
+                   )}
+                 </div>
+              </div>
+
+              <div className="flex-[1] bg-white erp-border flex flex-col overflow-hidden">
+                 <div className="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700 shrink-0">
+                   手工执行脚本参考 (Manual CLI Scripts)
+                 </div>
+                 <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 bg-gray-50">
+                    <div className="flex flex-col gap-1">
+                       <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">增量刷新脚本:</span>
+                       <code className="text-[11px] bg-white erp-border p-2 rounded text-erp-primary break-all select-all">
+                         powershell -ExecutionPolicy Bypass -File .\scripts\refresh_daily_bar_tushare.ps1 -TargetSource {targetSource}{endDate ? ` -EndDate ${endDate}` : ''}
+                       </code>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                       <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">全流程重建脚本:</span>
+                       <code className="text-[11px] bg-white erp-border p-2 rounded text-erp-primary break-all select-all">
+                         powershell -ExecutionPolicy Bypass -File .\scripts\refresh_full_pipeline_tushare.ps1 -TargetSource {targetSource}{endDate ? ` -EndDate ${endDate}` : ''}
+                       </code>
+                    </div>
+                 </div>
+              </div>
+           </div>
+        </div>
+
       </div>
     </div>
   )

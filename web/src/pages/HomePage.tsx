@@ -1,27 +1,16 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, NavLink } from 'react-router-dom'
 
 import { apiGet } from '../api/client'
-import { ContextStrip } from '../components/ContextStrip'
 import { DataTable } from '../components/DataTable'
 import { EntityCell } from '../components/EntityCell'
-import { MetricCard } from '../components/MetricCard'
-import { MarkdownCard } from '../components/MarkdownCard'
-import { MobileInspectionCard } from '../components/MobileInspectionCard'
-import { Panel } from '../components/Panel'
-import { PropertyGrid } from '../components/PropertyGrid'
 import { QueryNotice } from '../components/QueryNotice'
-import { SectionBlock } from '../components/SectionBlock'
-import { SpotlightCard } from '../components/SpotlightCard'
-import { SupportPanel } from '../components/SupportPanel'
-import { Badge } from '../components/Badge'
-import { WorkspaceHero } from '../components/WorkspaceHero'
 import { homeAiReviewClient, homeCandidatesClient, homeSummaryClient, homeWatchlistClient } from '../facades/dashboardPageClient'
-import { formatDateTime, formatPercent, formatValue } from '../lib/format'
+import { formatPercent, formatValue } from '../lib/format'
 import { HOME_REFETCH_INTERVAL_MS } from '../lib/polling'
-import { buildAiReviewPath, buildCandidatesPath, buildWatchlistPath } from '../lib/shareLinks'
-import { describeRealtimeSource, formatRealtimeCoverage, normalizeRealtimeFailedSymbols } from '../lib/realtime'
+import { buildCandidatesPath, buildWatchlistPath } from '../lib/shareLinks'
+import { describeRealtimeSource, normalizeRealtimeFailedSymbols } from '../lib/realtime'
 import type { ActionResult, BootstrapPayload, HomeAiReviewPayload, HomeCandidatesPayload, HomeSummaryPayload, HomeWatchlistPayload, JsonRecord } from '../types/api'
 
 interface HomePageProps {
@@ -45,16 +34,6 @@ const WATCHLIST_COLUMN_LABELS = {
   premarket_plan: '执行建议',
 }
 
-const CANDIDATE_COLUMNS = ['name', 'rank', 'industry', 'score', 'rank_pct', 'ret_t1_t10']
-const CANDIDATE_COLUMN_LABELS = {
-  name: '候选股',
-  rank: '排名',
-  industry: '行业',
-  score: '综合分数',
-  rank_pct: '分位',
-  ret_t1_t10: '未来10日收益',
-}
-
 const INFERENCE_COLUMNS = ['name', 'industry_display', 'final_score', 'confidence_level', 'action_hint']
 const INFERENCE_COLUMN_LABELS = {
   name: '推理股票',
@@ -64,47 +43,44 @@ const INFERENCE_COLUMN_LABELS = {
   action_hint: '操作建议',
 }
 
-function toneToNoticeClass(tone: string) {
-  if (tone === 'good') {
-    return 'query-notice query-notice--success'
-  }
-  if (tone === 'warn') {
-    return 'query-notice query-notice--error'
-  }
-  return 'query-notice query-notice--info'
-}
-
 function buildQuickActions(bootstrap?: BootstrapPayload) {
   const preferredOrder = ['latest_inference', 'overlay', 'watch_plan', 'action_memo']
   const actionLookup = new Map((bootstrap?.actions ?? []).map((item) => [item.actionName, item]))
   return preferredOrder.map((key) => actionLookup.get(key)).filter(Boolean) as NonNullable<BootstrapPayload['actions']>[number][]
 }
 
-function buildRecordTitle(record: JsonRecord | undefined): string {
-  const name = String(record?.name ?? '')
-  const symbol = String(record?.ts_code ?? '')
-  if (name && symbol) {
-    return `${name} / ${symbol}`
+function getConfidenceTone(value: unknown): 'default' | 'good' | 'warn' {
+  const text = String(value ?? '')
+  if (text.includes('高')) {
+    return 'good'
   }
-  return name || symbol || '暂无重点股票'
+  if (text.includes('低')) {
+    return 'warn'
+  }
+  return 'default'
 }
 
-function compactActionOutput(output: string | undefined): string {
-  if (!output) {
-    return '暂无输出'
-  }
-  return output.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '暂无输出'
+const AI_CANDIDATE_CELL_RENDERERS = {
+  name: (row: JsonRecord) => (
+    <EntityCell
+      title={String(row.name ?? '-')}
+      subtitle={String(row.ts_code ?? '')}
+      meta={String(row.industry_display ?? row.industry ?? '')}
+      badges={
+        String(row.confidence_level ?? '').trim()
+          ? [{ label: String(row.confidence_level), tone: getConfidenceTone(row.confidence_level) }]
+          : []
+      }
+    />
+  ),
 }
 
 export function HomePage({
   bootstrap,
   latestAction,
   authenticated,
-  currentUserLabel,
   actionPendingName,
-  sharingCurrentView,
   onRunAction,
-  onShareCurrentView,
 }: HomePageProps) {
   const navigate = useNavigate()
   const homeSummaryQuery = useQuery({
@@ -132,15 +108,16 @@ export function HomePage({
   const realtimeSnapshot = (service.realtime_snapshot as JsonRecord | undefined) ?? {}
   const overview = homeSummaryQuery.data?.overview
   const watchlist = homeWatchlistQuery.data
-  const candidates = homeCandidatesQuery.data
   const aiReview = homeAiReviewQuery.data
   const alerts = homeSummaryQuery.data?.alerts ?? []
   const focusWatchRecord = watchlist?.focusRecord ?? {}
-  const focusCandidateRecord = aiReview?.focusRecord ?? candidates?.focusRecord ?? {}
+  const focusCandidateRecord = aiReview?.focusRecord ?? homeCandidatesQuery.data?.focusRecord ?? {}
   const quickActions = useMemo(() => buildQuickActions(bootstrap), [bootstrap])
   const failedSymbols = normalizeRealtimeFailedSymbols(realtimeSnapshot.failed_symbols)
   const realtimeSource = describeRealtimeSource(realtimeSnapshot.source)
-  const realtimeCoverage = formatRealtimeCoverage(realtimeSnapshot.requested_symbol_count, realtimeSnapshot.success_symbol_count)
+  const realtimeCoverage = (realtimeSnapshot.success_symbol_count !== undefined && realtimeSnapshot.requested_symbol_count !== undefined)
+    ? `${realtimeSnapshot.success_symbol_count} / ${realtimeSnapshot.requested_symbol_count}`
+    : '0/0'
   const serviceRunning = String(service.effective_state ?? '') === 'running'
 
   const watchlistCellRenderers = useMemo(
@@ -151,9 +128,8 @@ export function HomePage({
           subtitle={String(row.ts_code ?? '')}
           meta={String(row.industry ?? row.source_category ?? '')}
           badges={[
-            row.source_category ? { label: String(row.source_category), tone: 'brand' as const } : null,
-            row.is_overlay_selected ? { label: '历史精选', tone: 'good' as const } : null,
-            row.is_inference_overlay_selected ? { label: '最新推理', tone: 'brand' as const } : null,
+            row.is_overlay_selected ? { label: '精选', tone: 'good' as const } : null,
+            row.is_inference_overlay_selected ? { label: '最新', tone: 'brand' as const } : null,
           ].filter(Boolean) as Array<{ label: string; tone?: 'default' | 'brand' | 'good' | 'warn' }>}
         />
       ),
@@ -161,400 +137,265 @@ export function HomePage({
     [],
   )
 
-  const candidateCellRenderers = useMemo(
-    () => ({
-      name: (row: JsonRecord) => (
-        <EntityCell
-          title={String(row.name ?? '-')}
-          subtitle={String(row.ts_code ?? '')}
-          meta={String(row.industry ?? row.industry_display ?? '')}
-        />
-      ),
-    }),
-    [],
-  )
-
-  const contextItems = [
-    {
-      label: '页面服务',
-      value: String(service.status_label_display ?? '未知'),
-      tone: String(service.effective_state ?? '') === 'running' ? ('good' as const) : ('warn' as const),
-    },
-    {
-      label: '行情快照',
-      value: String(realtimeSnapshot.snapshot_label_display ?? '暂无快照'),
-      helper: formatDateTime(realtimeSnapshot.fetched_at),
-    },
-    {
-      label: '观察池数量',
-      value: watchlist?.overview?.totalCount ?? 0,
-      helper: `浮盈亏 ${formatValue(watchlist?.overview?.unrealizedPnl ?? '-')}`,
-    },
-    {
-      label: '模型候选日期',
-      value: String(candidates?.latestDate ?? '-'),
-      helper: String(candidates?.modelName ?? '').toUpperCase(),
-    },
-    {
-      label: '最佳夏普模型',
-      value: String(overview?.bestSharpe?.model ?? '-').toUpperCase(),
-      helper: formatValue(overview?.bestSharpe?.daily_portfolio_sharpe ?? '-'),
-    },
-  ]
-
-  const heroBadges = (
-    <>
-      <Badge tone={serviceRunning ? 'good' : 'warn'}>{serviceRunning ? '服务正常' : '服务待确认'}</Badge>
-      <Badge tone={failedSymbols.length ? 'warn' : 'brand'}>{`行情覆盖 ${realtimeCoverage}`}</Badge>
-      <Badge tone={alerts.length ? 'warn' : 'good'}>{alerts.length ? `${alerts.length} 条风险提醒` : '暂无高优先级提醒'}</Badge>
-      <Badge tone={authenticated ? 'good' : 'default'}>{authenticated ? '可写' : '只读'}</Badge>
-    </>
-  )
-
   return (
-    <div className="page-stack">
-      <WorkspaceHero
-        title="交易概览"
-        className="home-anchor-hero"
-        description="把服务状态、候选结果、持仓重点和 AI 推理压缩到一个班次首页，先判断今天该盯什么，再决定进入哪条工作流。"
-        badges={heroBadges}
-        summary={
-          <dl className="workspace-hero__summary-grid">
-            <div>
-              <dt>页面服务</dt>
-              <dd>{String(service.status_label_display ?? '未知')}</dd>
-            </div>
-            <div>
-              <dt>行情快照</dt>
-              <dd>{String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}</dd>
-            </div>
-            <div>
-              <dt>观察池</dt>
-              <dd>{String(watchlist?.overview?.totalCount ?? 0)} 只</dd>
-            </div>
-            <div>
-              <dt>最强模型</dt>
-              <dd>{String(overview?.bestAnnualized?.model ?? '-').toUpperCase()}</dd>
-            </div>
-          </dl>
-        }
-      />
-
-      <div className="metric-grid metric-grid--four dashboard-status-grid">
-        <MetricCard label="观察池总数" value={watchlist?.overview?.totalCount ?? 0} />
-        <MetricCard label="AI 观察入池" value={watchlist?.overview?.overlayCount ?? 0} tone="good" />
-        <MetricCard label="风险提醒" value={alerts.length} tone={alerts.length ? 'warn' : 'good'} helper={alerts.length ? alerts[0]?.title : '暂无提醒'} />
-        <MetricCard
-          label="当前最强模型"
-          value={String(overview?.bestAnnualized?.model ?? '-').toUpperCase()}
-          helper={formatPercent(overview?.bestAnnualized?.daily_portfolio_annualized_return)}
-          tone="good"
-        />
-      </div>
-
-      <Panel title="总览" subtitle="先看班次结论、风险提醒和当前模型重心。" tone="warm" className="panel--summary-surface home-desk-panel">
-        <QueryNotice
-          isLoading={homeSummaryQuery.isLoading || homeWatchlistQuery.isLoading || homeCandidatesQuery.isLoading || homeAiReviewQuery.isLoading}
-          error={homeSummaryQuery.error ?? homeWatchlistQuery.error ?? homeCandidatesQuery.error ?? homeAiReviewQuery.error}
-        />
-
-        <SectionBlock title="值班结论">
-          <SpotlightCard
-            title={authenticated ? `欢迎回来，${currentUserLabel ?? '当前用户'}` : '当前为只读'}
-            meta="当前班次"
-            metrics={[
-              { label: '观察池数量', value: watchlist?.overview?.totalCount ?? 0 },
-              { label: '历史精选', value: watchlist?.overview?.overlayCount ?? 0 },
-              { label: '最新推理池', value: watchlist?.overview?.inferenceOverlayCount ?? 0 },
-              { label: '快照覆盖率', value: realtimeCoverage, tone: failedSymbols.length ? 'warn' : 'good' },
-              {
-                label: '当前最强模型',
-                value: String(overview?.bestAnnualized?.model ?? '-').toUpperCase(),
-                helper: formatPercent(overview?.bestAnnualized?.daily_portfolio_annualized_return),
-              },
-            ]}
-            actions={
-              <div className="spotlight-card__actions">
-                {quickActions.slice(0, 2).map((action, index) => (
-                  <button
-                    key={action.actionName}
-                    type="button"
-                    className={`button ${index === 0 ? 'button--primary' : 'button--ghost'}`}
-                    disabled={!authenticated || Boolean(actionPendingName)}
-                    onClick={() => onRunAction(action.actionName)}
-                  >
-                    {actionPendingName === action.actionName ? action.spinnerText ?? '执行中...' : action.label}
-                  </button>
-                ))}
-                <button type="button" className="button button--ghost" disabled={sharingCurrentView} onClick={onShareCurrentView}>
-                  {sharingCurrentView ? '复制中...' : '复制当前视图'}
-                </button>
-                <button type="button" className="button button--ghost" onClick={() => navigate('/workspace')}>
-                  查看工作台
-                </button>
-              </div>
-            }
-          />
-        </SectionBlock>
-
-        <ContextStrip items={contextItems} />
-
-        {alerts.length ? (
-          <SectionBlock title="风险提醒" tone="muted" collapsible defaultExpanded={false}>
-            <div className="section-stack">
-              {alerts.map((alert) => (
-                <div key={`${alert.title}-${alert.detail}`} className={toneToNoticeClass(alert.tone)}>
-                  <strong>{alert.title}</strong>
-                  <div>{alert.detail}</div>
-                </div>
-              ))}
-            </div>
-          </SectionBlock>
-        ) : null}
-      </Panel>
-
-      <Panel title="重点" subtitle="把当前最该关注的持仓与候选压成前台工作面。" className="panel--summary-surface home-focus-panel">
-        <div className="split-layout">
-          <SectionBlock title="持仓概览">
-            <SpotlightCard
-              title={buildRecordTitle(focusWatchRecord)}
-              meta={String(focusWatchRecord.source_category ?? focusWatchRecord.entry_group ?? '持仓')}
-              subtitle={String(focusWatchRecord.llm_latest_summary ?? focusWatchRecord.premarket_plan ?? focusWatchRecord.action_brief ?? '')}
-              metrics={[
-                { label: '最新价', value: formatValue(focusWatchRecord.realtime_price ?? focusWatchRecord.mark_price ?? '-') },
-                {
-                  label: '盘中涨跌',
-                  value: formatPercent(focusWatchRecord.realtime_pct_chg ?? '-'),
-                  tone:
-                    typeof focusWatchRecord.realtime_pct_chg === 'number' && Number(focusWatchRecord.realtime_pct_chg) > 0
-                      ? 'good'
-                      : 'warn',
-                },
-                { label: '推理排名', value: formatValue(focusWatchRecord.inference_ensemble_rank ?? '-') },
-                { label: '分析状态', value: formatValue(focusWatchRecord.llm_latest_status ?? '-') },
-              ]}
-              actions={
-                String(focusWatchRecord.ts_code ?? '').trim() ? (
-                  <div className="spotlight-card__actions">
-                    <button type="button" className="button button--primary" onClick={() => navigate(buildWatchlistPath(String(focusWatchRecord.ts_code)))}>
-                      查看持仓
-                    </button>
-                    <button type="button" className="button button--ghost" onClick={() => navigate(buildAiReviewPath(String(focusWatchRecord.ts_code)))}>
-                      AI 分析
-                    </button>
-                  </div>
-                ) : null
-              }
-            />
-          </SectionBlock>
-
-          <SectionBlock title="候选概览">
-            <SpotlightCard
-              title={buildRecordTitle(focusCandidateRecord)}
-              meta={String(focusCandidateRecord.industry_display ?? focusCandidateRecord.industry ?? '候选股')}
-              subtitle={String(focusCandidateRecord.action_hint ?? focusCandidateRecord.thesis_summary ?? '')}
-              metrics={[
-                { label: 'AI 总分', value: formatValue(focusCandidateRecord.final_score ?? '-') },
-                { label: '模型分数', value: formatValue(focusCandidateRecord.score ?? focusCandidateRecord.quant_score ?? '-') },
-                { label: '未来收益', value: formatPercent(focusCandidateRecord.ret_t1_t10 ?? '-') },
-                { label: '置信度', value: formatValue(focusCandidateRecord.confidence_level ?? '-') },
-              ]}
-              actions={
-                String(focusCandidateRecord.ts_code ?? '').trim() ? (
-                  <div className="spotlight-card__actions">
-                    <button type="button" className="button button--primary" onClick={() => navigate(buildCandidatesPath(String(focusCandidateRecord.ts_code)))}>
-                      查看候选
-                    </button>
-                    <button type="button" className="button button--ghost" onClick={() => navigate(buildAiReviewPath(String(focusCandidateRecord.ts_code)))}>
-                      查看 AI 分析
-                    </button>
-                  </div>
-                ) : null
-              }
-            />
-          </SectionBlock>
+    <div className="flex-1 flex flex-col overflow-hidden text-erp bg-erp-bg">
+      {/* Local Toolbar */}
+      <div className="h-10 bg-white erp-border-b flex items-center px-3 gap-3 shrink-0 overflow-x-auto overflow-y-hidden whitespace-nowrap text-erp">
+        <span className="font-bold text-gray-700 mr-2 flex items-center gap-2 shrink-0">
+          <i className="ph-fill ph-house text-erp-primary"></i> 
+          量化值班首页
+        </span>
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+        
+        {/* Quick Action Bar */}
+        <div className="flex items-center gap-2 shrink-0">
+          {quickActions.map((action) => (
+            <button
+              key={action.actionName}
+              className={`toolbar-btn ${actionPendingName === action.actionName ? 'disabled' : ''}`}
+              disabled={!authenticated || Boolean(actionPendingName)}
+              onClick={() => onRunAction(action.actionName)}
+            >
+              {actionPendingName === action.actionName ? (
+                <i className="ph ph-spinner animate-spin"></i>
+              ) : (
+                <i className="ph ph-play-circle text-erp-success"></i>
+              )}
+              {action.label}
+            </button>
+          ))}
+          <div className="w-px h-5 bg-gray-300 mx-1"></div>
+          <button className="toolbar-btn" onClick={() => navigate('/workspace')}>
+            <i className="ph ph-monitor-play"></i> 进入工作台
+          </button>
         </div>
-      </Panel>
 
-      <div className="mobile-inspection-stack mobile-only">
-        <MobileInspectionCard
-          title={alerts.length ? `${alerts.length} 条今日提醒` : '暂无高优先级提醒'}
-          subtitle={alerts[0] ? String(alerts[0].detail ?? alerts[0].title ?? '') : undefined}
-          badges={
-            <div className="badge-row">
-              <Badge tone={alerts.length ? 'warn' : 'good'}>{alerts.length ? '需要关注' : '状态正常'}</Badge>
-              <Badge tone="brand">{realtimeCoverage}</Badge>
-            </div>
-          }
-          actions={
-            alerts.length ? (
-              <details className="details-block">
-                <summary>展开提醒列表</summary>
-                <div className="section-stack">
-                  {alerts.map((alert) => (
-                    <div key={`${alert.title}-${alert.detail}`} className={toneToNoticeClass(alert.tone)}>
-                      <strong>{alert.title}</strong>
-                      <div>{alert.detail}</div>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            ) : null
-          }
-        />
-
-        <MobileInspectionCard
-          title={buildRecordTitle(focusWatchRecord)}
-          subtitle={String(focusWatchRecord.premarket_plan ?? focusWatchRecord.action_brief ?? '')}
-          badges={
-            <div className="badge-row">
-              <Badge tone="brand">{String(focusWatchRecord.entry_group ?? '持仓')}</Badge>
-              {focusWatchRecord.source_category ? <Badge tone="brand">{String(focusWatchRecord.source_category)}</Badge> : null}
-              <Badge tone={typeof focusWatchRecord.realtime_pct_chg === 'number' && Number(focusWatchRecord.realtime_pct_chg) > 0 ? 'good' : 'warn'}>
-                {formatPercent(focusWatchRecord.realtime_pct_chg ?? '-')}
-              </Badge>
-            </div>
-          }
-          body={
-            <PropertyGrid
-              items={[
-                { label: '来源标签', value: formatValue(focusWatchRecord.source_tags ?? '-') , span: 'double' },
-                { label: '最新价', value: formatValue(focusWatchRecord.realtime_price ?? focusWatchRecord.mark_price ?? '-') },
-                { label: '推理排名', value: formatValue(focusWatchRecord.inference_ensemble_rank ?? '-') },
-              ]}
-            />
-          }
-          actions={
-            String(focusWatchRecord.ts_code ?? '').trim() ? (
-              <div className="inline-actions inline-actions--compact">
-                <button type="button" className="button button--primary" onClick={() => navigate(buildWatchlistPath(String(focusWatchRecord.ts_code)))}>
-                  查看持仓
-                </button>
-                <button type="button" className="button button--ghost" onClick={() => navigate(buildAiReviewPath(String(focusWatchRecord.ts_code)))}>
-                  AI 分析
-                </button>
-              </div>
-            ) : null
-          }
-        />
-
-        <MobileInspectionCard
-          title={buildRecordTitle(focusCandidateRecord)}
-          subtitle={String(focusCandidateRecord.action_hint ?? focusCandidateRecord.thesis_summary ?? '')}
-          badges={
-            <div className="badge-row">
-              <Badge tone="brand">{String(focusCandidateRecord.industry_display ?? focusCandidateRecord.industry ?? '候选股')}</Badge>
-              <Badge tone="good">{formatValue(focusCandidateRecord.final_score ?? '-')}</Badge>
-            </div>
-          }
-          body={
-            <PropertyGrid
-              items={[
-                { label: '模型分数', value: formatValue(focusCandidateRecord.score ?? focusCandidateRecord.quant_score ?? '-') },
-                { label: '未来收益', value: formatPercent(focusCandidateRecord.ret_t1_t10 ?? '-') },
-              ]}
-            />
-          }
-          actions={
-            String(focusCandidateRecord.ts_code ?? '').trim() ? (
-              <div className="inline-actions inline-actions--compact">
-                <button type="button" className="button button--primary" onClick={() => navigate(buildCandidatesPath(String(focusCandidateRecord.ts_code)))}>
-                  查看候选
-                </button>
-                <button type="button" className="button button--ghost" onClick={() => navigate(buildAiReviewPath(String(focusCandidateRecord.ts_code)))}>
-                  查看 AI 分析
-                </button>
-              </div>
-            ) : null
-          }
-        />
+        <div className="ml-auto flex items-center gap-4 text-erp-sm shrink-0">
+          <div className="flex items-center gap-1">
+             <span className="text-gray-500">行情覆盖:</span>
+             <span className={`font-bold font-mono ${failedSymbols.length ? 'text-erp-warning' : 'text-erp-success'}`}>{realtimeCoverage}</span>
+          </div>
+          <div className="flex items-center gap-1">
+             <span className="text-gray-500">页面服务:</span>
+             <span className={`font-bold uppercase ${serviceRunning ? 'text-erp-success' : 'text-erp-danger'}`}>{String(service.status_label_display || 'OFFLINE')}</span>
+          </div>
+        </div>
       </div>
 
-      <SupportPanel title="更多" className="home-support-panel">
-        <SectionBlock title="AI Shortlist" collapsible defaultExpanded={false}>
-          <MarkdownCard title="最新推理 Shortlist" content={aiReview?.shortlistMarkdown} />
-        </SectionBlock>
+      <div className="flex-1 overflow-y-auto bg-white flex flex-col p-8 gap-12 text-erp">
+        <QueryNotice
+          isLoading={homeSummaryQuery.isLoading}
+          error={homeSummaryQuery.error}
+        />
 
-        <SectionBlock title="观察池总表" collapsible defaultExpanded={false}>
-          <DataTable
-            rows={watchlist?.records ?? []}
-            columns={WATCHLIST_COLUMNS}
-            columnLabels={WATCHLIST_COLUMN_LABELS}
-            storageKey="home-watchlist"
-            loading={homeWatchlistQuery.isLoading}
-            emptyText="暂无观察池数据"
-            stickyFirstColumn
-            cellRenderers={watchlistCellRenderers}
-          />
-        </SectionBlock>
+        {/* Top Operational Metrics */}
+        <div className="flex items-center gap-16 shrink-0 border-b erp-border pb-10">
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">观察池标的总数</span>
+            <span className="text-4xl font-mono font-bold leading-none text-gray-700">{String(watchlist?.overview?.totalCount ?? 0)}</span>
+            <span className="text-[10px] text-gray-400 mt-2 uppercase font-bold">精选占比: {formatPercent(Number(watchlist?.overview?.overlayCount ?? 0) / (Number(watchlist?.overview?.totalCount) || 1))}</span>
+          </div>
+          <div className="w-px h-12 bg-gray-200"></div>
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">今日风险提醒</span>
+            <span className={`text-4xl font-mono font-bold leading-none ${alerts.length ? 'text-erp-danger' : 'text-gray-300'}`}>{alerts.length}</span>
+            <span className="text-[10px] text-gray-400 mt-2 uppercase font-bold">高优先级: {alerts.filter(a => a.tone === 'warn').length}</span>
+          </div>
+          <div className="w-px h-12 bg-gray-200"></div>
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">当前最强模型 (年化)</span>
+            <span className="text-4xl font-mono font-bold leading-none text-erp-danger">{formatPercent(overview?.bestAnnualized?.daily_portfolio_annualized_return)}</span>
+            <span className="text-[10px] text-gray-400 mt-2 uppercase font-bold tracking-widest">{String(overview?.bestAnnualized?.model ?? '-').toUpperCase()}</span>
+          </div>
+          
+          <div className="flex-1 max-w-xl border-l erp-border pl-10 ml-4">
+             <div className={`p-4 rounded-lg border-2 border-dashed transition-colors ${serviceRunning ? 'bg-green-50/30 border-green-200' : 'bg-red-50/30 border-red-200'}`}>
+                <div className="text-xs font-bold uppercase mb-2 flex items-center gap-2">
+                   <div className={`w-2 h-2 rounded-full ${serviceRunning ? 'bg-erp-success animate-pulse' : 'bg-erp-danger'}`}></div>
+                   系统运行环境快照
+                </div>
+                <div className="text-gray-600 text-sm leading-relaxed">
+                   当前行情源: <span className="font-bold text-gray-800">{realtimeSource.label}</span> | 
+                   快照时间: <span className="font-mono">{String(realtimeSnapshot.snapshot_label_display || '未同步')}</span>
+                   <br/>
+                   最近操作结果: <span className={`font-bold ${latestAction?.ok ? 'text-erp-success' : 'text-erp-danger'}`}>{latestAction ? (latestAction.ok ? 'SUCCESS' : 'FAILED') : 'NONE'}</span>
+                </div>
+             </div>
+          </div>
+        </div>
 
-        <SectionBlock title="候选池总表" collapsible defaultExpanded={false}>
-          <DataTable
-            rows={candidates?.records ?? []}
-            columns={CANDIDATE_COLUMNS}
-            columnLabels={CANDIDATE_COLUMN_LABELS}
-            storageKey="home-candidates"
-            loading={homeCandidatesQuery.isLoading}
-            emptyText="暂无候选股"
-            stickyFirstColumn
-            cellRenderers={candidateCellRenderers}
-          />
-        </SectionBlock>
-
-        <SectionBlock title="AI 最新推理池" tone="muted" collapsible defaultExpanded={false}>
-          <DataTable
-            rows={aiReview?.inferenceRecords ?? []}
-            columns={INFERENCE_COLUMNS}
-            columnLabels={INFERENCE_COLUMN_LABELS}
-            storageKey="home-ai-inference"
-            loading={homeAiReviewQuery.isLoading}
-            emptyText="暂无 AI 推理股票"
-            stickyFirstColumn
-            cellRenderers={candidateCellRenderers}
-          />
-        </SectionBlock>
-
-        <SectionBlock title="系统与行情" collapsible defaultExpanded={false}>
-          <PropertyGrid
-            items={[
-              { label: '快照状态', value: String(realtimeSnapshot.snapshot_label_display ?? '暂无快照') },
-              { label: '快照时间', value: formatDateTime(realtimeSnapshot.fetched_at) },
-              { label: '行情来源', value: realtimeSource.label },
-              { label: '覆盖率', value: realtimeCoverage, tone: failedSymbols.length ? 'warn' : 'good' },
-              {
-                label: '失败股票',
-                value: failedSymbols.length ? failedSymbols.join(' / ') : '暂无',
-                span: 'double',
-                tone: failedSymbols.length ? 'warn' : 'good',
-              },
-              { label: '参数概览', value: homeSummaryQuery.data?.configSummaryText ?? '暂无参数概览', span: 'double' },
-            ]}
-          />
-        </SectionBlock>
-
-        <SectionBlock title="最近动作" collapsible defaultExpanded={false}>
-          {latestAction ? (
-            <div className="section-stack">
-              <SpotlightCard
-                title={latestAction.ok ? '执行完成' : '执行失败'}
-                meta={latestAction.actionName}
-                subtitle={compactActionOutput(latestAction.output)}
-                metrics={[
-                  { label: '动作名称', value: latestAction.actionName },
-                  { label: '状态', value: latestAction.ok ? '完成' : '失败', tone: latestAction.ok ? 'good' : 'warn' },
-                ]}
-              />
-              <details className="details-block">
-                <summary>查看完整输出</summary>
-                <pre className="log-block">{latestAction.output || '暂无输出'}</pre>
-              </details>
+        {/* Alerts Section (Only if exists) */}
+        {alerts.length > 0 && (
+          <section className="flex flex-col gap-6">
+            <h4 className="text-erp-danger font-bold text-sm flex items-center gap-2 border-l-4 border-erp-danger pl-3 uppercase tracking-wider">
+              <i className="ph-fill ph-warning-octagon"></i> 核心交易风险提醒 (Critical Alerts)
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+               {alerts.map((alert, idx) => (
+                 <div key={idx} className="flex gap-4 p-4 bg-red-50/20 border border-red-100 rounded-lg">
+                    <i className={`ph-fill ${alert.tone === 'warn' ? 'ph-warning text-erp-danger' : 'ph-info text-blue-500'} text-xl shrink-0`}></i>
+                    <div className="flex flex-col">
+                       <span className="font-bold text-gray-800">{alert.title}</span>
+                       <span className="text-sm text-gray-600 mt-1">{alert.detail}</span>
+                    </div>
+                 </div>
+               ))}
             </div>
-          ) : (
-            <div className="empty-state">还没有执行记录，可先从首页快捷动作开始。</div>
-          )}
-        </SectionBlock>
-      </SupportPanel>
+          </section>
+        )}
 
+        {/* Focused Work Area */}
+        <div className="grid grid-cols-2 gap-16">
+          {/* Focused Position */}
+          <section className="flex flex-col gap-8">
+             <div className="flex items-center justify-between">
+                <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3 uppercase text-erp">
+                  <i className="ph ph-target"></i> 核心持仓盯盘 (Focus Position)
+                </h4>
+                {Boolean(focusWatchRecord.ts_code) && (
+                  <button className="text-xs text-erp-primary hover:underline font-bold" onClick={() => navigate(buildWatchlistPath(String(focusWatchRecord.ts_code)))}>
+                    查看详情报告 <i className="ph ph-arrow-right"></i>
+                  </button>
+                )}
+             </div>
+             
+             {focusWatchRecord.ts_code ? (
+               <div className="flex flex-col gap-6">
+                  <div className="flex items-end gap-4">
+                     <span className="text-3xl font-bold text-gray-800">{String(focusWatchRecord.name)}</span>
+                     <span className="text-lg font-mono text-gray-400 mb-1">{String(focusWatchRecord.ts_code)}</span>
+                     <span className="px-2 py-0.5 bg-blue-50 text-blue-600 border border-blue-100 rounded text-xs mb-1.5 uppercase font-bold shrink-0">
+                        {String(focusWatchRecord.source_category || '持仓')}
+                     </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-8 bg-gray-50/50 p-6 rounded-xl border erp-border border-dashed">
+                     <div className="flex flex-col">
+                        <span className="text-[10px] text-gray-400 font-bold uppercase mb-1">盘中涨跌</span>
+                        <span className={`text-2xl font-mono font-bold ${Number(focusWatchRecord.realtime_pct_chg) > 0 ? 'text-erp-danger' : 'text-erp-success'}`}>
+                           {formatPercent(focusWatchRecord.realtime_pct_chg)}
+                        </span>
+                     </div>
+                     <div className="flex flex-col">
+                        <span className="text-[10px] text-gray-400 font-bold uppercase mb-1">推理排名</span>
+                        <span className="text-2xl font-mono font-bold text-gray-700"># {String(focusWatchRecord.inference_ensemble_rank || '-')}</span>
+                     </div>
+                     <div className="col-span-2">
+                        <span className="text-[10px] text-gray-400 font-bold uppercase mb-1">AI 策略摘要</span>
+                        <p className="text-sm text-gray-600 leading-relaxed italic">
+                           "{String(focusWatchRecord.llm_latest_summary || focusWatchRecord.premarket_plan || '暂无详细分析')}"
+                        </p>
+                     </div>
+                  </div>
+               </div>
+             ) : (
+               <div className="h-48 erp-border border-dashed rounded-xl flex items-center justify-center text-gray-400 text-sm">
+                  今日暂无重点盯盘股票
+               </div>
+             )}
+          </section>
+
+          {/* Focused Candidate */}
+          <section className="flex flex-col gap-8">
+             <div className="flex items-center justify-between">
+                <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3 uppercase text-erp">
+                  <i className="ph ph-lightning"></i> 重点候选信号 (Focus Candidate)
+                </h4>
+                {Boolean(focusCandidateRecord.ts_code) && (
+                  <button className="text-xs text-erp-primary hover:underline font-bold" onClick={() => navigate(buildCandidatesPath(String(focusCandidateRecord.ts_code)))}>
+                    查看完整候选池 <i className="ph ph-arrow-right"></i>
+                  </button>
+                )}
+             </div>
+
+             {focusCandidateRecord.ts_code ? (
+               <div className="flex flex-col gap-6">
+                  <div className="flex items-end gap-4">
+                     <span className="text-3xl font-bold text-gray-800">{String(focusCandidateRecord.name)}</span>
+                     <span className="text-lg font-mono text-gray-400 mb-1">{String(focusCandidateRecord.ts_code)}</span>
+                     <span className="px-2 py-0.5 bg-gray-100 text-gray-500 border border-gray-200 rounded text-xs mb-1.5 uppercase font-bold shrink-0">
+                        {String(focusCandidateRecord.industry_display || '候选')}
+                     </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-8 bg-gray-50/50 p-6 rounded-xl border erp-border border-dashed">
+                     <div className="flex flex-col">
+                        <span className="text-[10px] text-gray-400 font-bold uppercase mb-1">AI 综合总分</span>
+                        <span className="text-2xl font-mono font-bold text-erp-primary">
+                           {formatValue(focusCandidateRecord.final_score)}
+                        </span>
+                     </div>
+                     <div className="flex flex-col">
+                        <span className="text-[10px] text-gray-400 font-bold uppercase mb-1">预测 10D 收益</span>
+                        <span className="text-2xl font-mono font-bold text-erp-danger">
+                           {formatPercent(focusCandidateRecord.ret_t1_t10)}
+                        </span>
+                     </div>
+                     <div className="col-span-2">
+                        <span className="text-[10px] text-gray-400 font-bold uppercase mb-1">入选理由</span>
+                        <p className="text-sm text-gray-600 leading-relaxed italic">
+                           "{String(focusCandidateRecord.action_hint || focusCandidateRecord.thesis_summary || '暂无明确理由')}"
+                        </p>
+                     </div>
+                  </div>
+               </div>
+             ) : (
+               <div className="h-48 erp-border border-dashed rounded-xl flex items-center justify-center text-gray-400 text-sm">
+                  今日暂无显著买入候选信号
+               </div>
+             )}
+          </section>
+        </div>
+
+        {/* Global Summary Data Grids - Expandable Sections */}
+        <section className="border-t erp-border pt-12 flex flex-col gap-10">
+           <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-gray-700 font-bold text-xs uppercase tracking-widest flex items-center gap-2">
+                  <i className="ph ph-table"></i> 今日观察池数据概览 (Watchlist Data Preview)
+                </h4>
+                <NavLink to="/watchlist" className="text-[10px] text-erp-primary font-bold hover:underline">查看全量表格</NavLink>
+              </div>
+              <div className="erp-border rounded-lg overflow-hidden h-[300px]">
+                <DataTable
+                  rows={watchlist?.records ?? []}
+                  columns={WATCHLIST_COLUMNS}
+                  columnLabels={WATCHLIST_COLUMN_LABELS}
+                  storageKey="home-watchlist"
+                  loading={homeWatchlistQuery.isLoading}
+                  emptyText="暂无数据"
+                  stickyFirstColumn
+                  cellRenderers={watchlistCellRenderers}
+                />
+              </div>
+           </div>
+
+           <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-gray-700 font-bold text-xs uppercase tracking-widest flex items-center gap-2">
+                  <i className="ph ph-table"></i> 智能研报精选列表 (AI Shortlist)
+                </h4>
+                <NavLink to="/ai-review" className="text-[10px] text-erp-primary font-bold hover:underline">查看深度研报</NavLink>
+              </div>
+              <div className="erp-border rounded-lg overflow-hidden h-[300px]">
+                <DataTable
+                  rows={aiReview?.inferenceRecords ?? []}
+                  columns={INFERENCE_COLUMNS}
+                  columnLabels={INFERENCE_COLUMN_LABELS}
+                  storageKey="home-ai-inference"
+                  loading={homeAiReviewQuery.isLoading}
+                  emptyText="暂无数据"
+                  stickyFirstColumn
+                  cellRenderers={AI_CANDIDATE_CELL_RENDERERS}
+                />
+              </div>
+           </div>
+        </section>
+
+        {/* System Config Snippet */}
+        <section className="mb-10 bg-gray-50/50 p-6 rounded-xl erp-border border-dotted text-[11px] text-gray-500 leading-relaxed font-mono">
+           <div className="font-bold text-gray-400 mb-2 uppercase">System Configuration Snippet:</div>
+           {homeSummaryQuery.data?.configSummaryText || 'No custom parameters active.'}
+        </section>
+      </div>
     </div>
   )
 }

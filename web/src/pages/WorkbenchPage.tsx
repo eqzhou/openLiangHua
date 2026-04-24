@@ -1,11 +1,3 @@
-import { Badge } from '../components/Badge'
-import { MetricCard } from '../components/MetricCard'
-import { Panel } from '../components/Panel'
-import { PropertyGrid } from '../components/PropertyGrid'
-import { SectionBlock } from '../components/SectionBlock'
-import { SpotlightCard } from '../components/SpotlightCard'
-import { SupportPanel } from '../components/SupportPanel'
-import { WorkspaceHero } from '../components/WorkspaceHero'
 import { formatDateTime } from '../lib/format'
 import { describeRealtimeSnapshotMode, describeRealtimeSource, formatRealtimeCoverage, normalizeRealtimeFailedSymbols } from '../lib/realtime'
 import type { ActionResult, JsonRecord, ShellPayload } from '../types/api'
@@ -29,25 +21,15 @@ interface WorkbenchPageProps {
   onShareCurrentView: () => void
 }
 
-function compactActionOutput(output: string | undefined): string {
-  if (!output) {
-    return '暂无输出'
-  }
-  return output.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '暂无输出'
-}
-
 export function WorkbenchPage({
   shell,
   latestAction,
-  shellError,
   shellLoading,
   authenticated,
   currentUserLabel,
   configSaving,
   actionPendingName,
   clearingCache,
-  resettingUiPreferences,
-  sharingCurrentView,
   onSaveConfig,
   onRunAction,
   onClearCache,
@@ -65,235 +47,210 @@ export function WorkbenchPage({
   const snapshotCoverage = formatRealtimeCoverage(realtimeSnapshot.requested_symbol_count, realtimeSnapshot.success_symbol_count)
   const snapshotFailedSymbols = normalizeRealtimeFailedSymbols(realtimeSnapshot.failed_symbols)
   const snapshotTone = snapshotMode.tone === 'good' ? 'good' : snapshotMode.tone === 'warn' ? 'warn' : 'default'
-  const heroBadges = (
-    <>
-      <Badge tone={authenticated ? 'good' : 'default'}>{authenticated ? '可写' : '只读'}</Badge>
-      <Badge tone={snapshotTone === 'warn' ? 'warn' : 'brand'}>{snapshotMode.label}</Badge>
-      <Badge tone={snapshotFailedSymbols.length ? 'warn' : 'good'}>{`覆盖 ${snapshotCoverage}`}</Badge>
-      <Badge tone="brand">{snapshotSource.label}</Badge>
-    </>
-  )
 
   return (
-    <div className="page-stack">
-      <WorkspaceHero
-        title="工作台"
-        className="workbench-anchor-hero"
-        description="这里负责研究参数、动作执行和界面控制。先确认参数，再按顺序跑研究动作，最后把结果回写到首页、持仓和 AI 分析页。"
-        badges={heroBadges}
-        summary={
-          <dl className="workspace-hero__summary-grid">
-            <div>
-              <dt>页面服务</dt>
-              <dd>{String(service?.status_label_display ?? '未知')}</dd>
-            </div>
-            <div>
-              <dt>实时快照</dt>
-              <dd>{String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}</dd>
-            </div>
-            <div>
-              <dt>观察池</dt>
-              <dd>{shell?.watchlistEntryCount ?? 0} 只</dd>
-            </div>
-            <div>
-              <dt>当前模式</dt>
-              <dd>{authenticated ? currentUserLabel ?? '可写' : '只读'}</dd>
-            </div>
-          </dl>
-        }
-      />
+    <div className="flex-1 flex flex-col overflow-hidden text-erp bg-erp-bg">
+      {/* Local Toolbar */}
+      <div className="h-10 bg-white erp-border-b flex items-center px-3 gap-3 shrink-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
+        <span className="font-bold text-gray-700 mr-2 flex items-center gap-2 shrink-0">
+          <i className="ph-fill ph-monitor-play text-erp-primary"></i> 
+          核心控制台
+        </span>
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+        
+        {/* Operation Mode */}
+        <div className="flex items-center gap-3 text-erp-sm shrink-0">
+           <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded border ${authenticated ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+              <div className={`w-2 h-2 rounded-full ${authenticated ? 'bg-erp-success' : 'bg-gray-400'}`}></div>
+              <span className="font-bold uppercase">{authenticated ? `WRITE_ENABLED: ${currentUserLabel}` : 'READ_ONLY_MODE'}</span>
+           </div>
+           <div className="flex items-center gap-1">
+             <span className="text-gray-400 font-mono">| SNAPSHOT:</span>
+             <span className={`font-bold ${snapshotTone === 'good' ? 'text-erp-success' : 'text-erp-warning'}`}>{snapshotMode.label}</span>
+           </div>
+        </div>
 
-      <div className="metric-grid metric-grid--four">
-        <MetricCard label="观察池数量" value={shell?.watchlistEntryCount ?? 0} />
-        <MetricCard label="快照覆盖率" value={snapshotCoverage} tone={snapshotFailedSymbols.length ? 'warn' : 'good'} />
-        <MetricCard label="行情来源" value={snapshotSource.label} helper={snapshotSource.mode} />
-        <MetricCard label="最近动作" value={latestAction?.label ?? latestAction?.actionName ?? '暂无'} tone={latestAction?.ok === false ? 'warn' : 'default'} />
+        <div className="ml-auto flex items-center gap-4 text-erp-sm shrink-0">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">观察池:</span> 
+            <span className="font-bold font-mono text-erp-primary">{shell?.watchlistEntryCount ?? 0}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">覆盖率:</span> 
+            <span className={`font-bold font-mono ${snapshotFailedSymbols.length ? 'text-erp-warning' : ''}`}>{snapshotCoverage}</span>
+          </div>
+        </div>
       </div>
 
-      <Panel title="状态" subtitle="先确认当前服务、快照和用户状态，再决定是否执行写操作。" tone="warm" className="panel--summary-surface workbench-status-panel">
-        {shellError ? <div className="query-notice query-notice--error">{shellError}</div> : null}
-        {shellLoading ? <div className="query-notice">同步中...</div> : null}
-        {writeLocked ? (
-          <div className="query-notice query-notice--info">当前只读，请先登录后再执行写操作。</div>
-        ) : (
-          <div className="query-notice query-notice--success">当前登录用户：{currentUserLabel ?? '可写'}，当前可写。</div>
-        )}
-
-        <SectionBlock title="当前工作状态">
-          <SpotlightCard
-            title="工作台状态"
-            meta={String(service?.status_label_display ?? '未知')}
-            metrics={[
-              { label: '页面服务', value: service?.status_label_display ?? '未知' },
-              { label: '实时快照', value: String(realtimeSnapshot.snapshot_label_display ?? '暂无快照'), tone: snapshotTone, helper: formatDateTime(realtimeSnapshot.fetched_at) },
-              { label: '观察池数量', value: shell?.watchlistEntryCount ?? 0 },
-              { label: '最近动作', value: latestAction?.label ?? latestAction?.actionName ?? '暂无' },
-            ]}
-          />
-
-          <div className="metric-grid metric-grid--four">
-            <MetricCard label="快照覆盖率" value={snapshotCoverage} tone={snapshotFailedSymbols.length ? 'warn' : 'good'} />
-            <MetricCard label="行情来源" value={snapshotSource.label} helper={snapshotSource.mode} />
-            <MetricCard label="快照状态" value={snapshotMode.label} tone={snapshotTone} />
-            <MetricCard label="当前用户" value={authenticated ? currentUserLabel ?? '可写' : '只读'} tone={authenticated ? 'good' : 'warn'} />
+      <div className="flex-1 overflow-y-auto bg-erp-bg p-2 flex flex-col gap-2">
+        <div className="flex-1 flex gap-2 min-h-[600px]">
+          
+          {/* Left Column: Config Form */}
+          <div className="w-[400px] flex flex-col gap-2 shrink-0">
+            <div className="bg-white erp-border flex flex-col h-full overflow-hidden">
+               <div className="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700 shrink-0">
+                 01. 研究参数配置 (Parameters)
+               </div>
+               <div className="flex-1 overflow-y-auto p-5">
+                  <form
+                    key={JSON.stringify(config ?? {})}
+                    className="flex flex-col gap-6"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      const form = new FormData(event.currentTarget)
+                      onSaveConfig({
+                        train_start: form.get('train_start'),
+                        train_end: form.get('train_end'),
+                        valid_end: form.get('valid_end'),
+                        test_end: form.get('test_end'),
+                        label_col: form.get('label_col'),
+                        top_n: Number(form.get('top_n') ?? 10),
+                      })
+                    }}
+                  >
+                    <div className="grid grid-cols-1 gap-4 text-erp-sm">
+                       {[
+                         { id: 'train_start', label: '训练起始日期', type: 'date', val: config?.train_start },
+                         { id: 'train_end', label: '训练截止日期', type: 'date', val: config?.train_end },
+                         { id: 'valid_end', label: '验证截止日期', type: 'date', val: config?.valid_end },
+                         { id: 'test_end', label: '测试截止日期', type: 'date', val: config?.test_end },
+                       ].map(field => (
+                        <div key={field.id} className="flex flex-col gap-1.5">
+                           <label className="text-gray-500 font-bold uppercase text-[10px] tracking-wider">{field.label}</label>
+                           <input name={field.id} type={field.type as string} defaultValue={String(field.val ?? '')} 
+                                  className="erp-border rounded px-2 h-8 bg-gray-50 focus:bg-white focus:ring-1 focus:ring-erp-primary outline-none transition-all" />
+                        </div>
+                       ))}
+                       
+                       <div className="flex flex-col gap-1.5">
+                          <label className="text-gray-500 font-bold uppercase text-[10px] tracking-wider">预测标签周期 (Label)</label>
+                          <select name="label_col" defaultValue={String(config?.label_col ?? 'ret_t1_t10')}
+                                  className="erp-border rounded px-2 h-8 bg-gray-50 focus:bg-white outline-none">
+                             {labelOptions.map((option) => (
+                               <option key={option} value={option}>{option}</option>
+                             ))}
+                          </select>
+                       </div>
+                       
+                       <div className="flex flex-col gap-1.5">
+                          <label className="text-gray-500 font-bold uppercase text-[10px] tracking-wider">候选股入选数量 (TopN)</label>
+                          <input name="top_n" type="number" min={1} max={100} defaultValue={Number(config?.top_n ?? 10)} 
+                                 className="erp-border rounded px-2 h-8 bg-gray-50 focus:bg-white outline-none" />
+                       </div>
+                    </div>
+                    
+                    <div className="pt-4 mt-4 border-t erp-border">
+                       <button type="submit" 
+                               className={`w-full h-9 flex items-center justify-center gap-2 rounded font-bold text-white transition-all shadow-sm ${writeLocked || configSaving ? 'bg-gray-300 cursor-not-allowed' : 'bg-erp-primary hover:bg-erp-primary-hover active:scale-[0.98]'}`}
+                               disabled={writeLocked || configSaving || shellLoading}>
+                         {configSaving ? <i className="ph ph-spinner animate-spin"></i> : <i className="ph ph-floppy-disk"></i>}
+                         {configSaving ? '正在写入数据库...' : '保存当前配置'}
+                       </button>
+                    </div>
+                  </form>
+               </div>
+               
+               <div className="p-4 bg-gray-50 erp-border-t">
+                  <div className="text-[10px] text-gray-400 font-bold uppercase mb-2">活跃配置指纹:</div>
+                  <p className="text-[11px] text-gray-500 leading-relaxed font-mono break-all italic bg-white p-2 erp-border rounded">
+                    {shell?.configSummaryText || 'Default internal state active.'}
+                  </p>
+               </div>
+            </div>
           </div>
-        </SectionBlock>
 
-      </Panel>
-
-      <Panel title="参数" subtitle="研究参数会直接影响训练区间、标签周期和候选输出。" eyebrow="01" className="panel--summary-surface workbench-config-panel">
-        <div className="split-layout split-layout--workspace">
-          <SectionBlock title="参数表单">
-            <form
-              key={JSON.stringify(config ?? {})}
-              className="config-form"
-              onSubmit={(event) => {
-                event.preventDefault()
-                const form = new FormData(event.currentTarget)
-                onSaveConfig({
-                  train_start: form.get('train_start'),
-                  train_end: form.get('train_end'),
-                  valid_end: form.get('valid_end'),
-                  test_end: form.get('test_end'),
-                  label_col: form.get('label_col'),
-                  top_n: Number(form.get('top_n') ?? 10),
-                })
-              }}
-            >
-              <label>
-                <span>训练起始日期</span>
-                <input name="train_start" type="date" defaultValue={String(config?.train_start ?? '')} />
-              </label>
-              <label>
-                <span>训练截止日期</span>
-                <input name="train_end" type="date" defaultValue={String(config?.train_end ?? '')} />
-              </label>
-              <label>
-                <span>验证截止日期</span>
-                <input name="valid_end" type="date" defaultValue={String(config?.valid_end ?? '')} />
-              </label>
-              <label>
-                <span>测试截止日期</span>
-                <input name="test_end" type="date" defaultValue={String(config?.test_end ?? '')} />
-              </label>
-              <label>
-                <span>标签周期</span>
-                <select name="label_col" defaultValue={String(config?.label_col ?? 'ret_t1_t10')}>
-                  {labelOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
+          {/* Right Column: Execution & Console */}
+          <div className="flex-1 flex flex-col gap-2">
+             {/* Action Grid */}
+             <div className="bg-white erp-border flex flex-col h-[280px] overflow-hidden shrink-0">
+                <div className="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700 shrink-0">
+                  02. 自动化研究动作 (Actions)
+                </div>
+                <div className="flex-1 p-4 grid grid-cols-2 lg:grid-cols-4 gap-3 overflow-y-auto">
+                   {(bootstrap?.actions ?? []).map((action) => (
+                    <button
+                      key={action.buttonKey ?? action.actionName}
+                      className={`flex flex-col items-center justify-center p-4 rounded-lg erp-border bg-gray-50 hover:bg-white hover:shadow-md transition-all gap-2 group ${actionPendingName === action.actionName ? 'animate-pulse border-erp-primary' : ''}`}
+                      disabled={writeLocked || Boolean(actionPendingName)}
+                      onClick={() => onRunAction(action.actionName)}
+                    >
+                      {actionPendingName === action.actionName ? (
+                        <i className="ph ph-circle-notch animate-spin text-2xl text-erp-primary"></i>
+                      ) : (
+                        <i className={`ph ph-lightning-bolt text-2xl ${latestAction?.actionName === action.actionName ? 'text-erp-success' : 'text-gray-400 group-hover:text-erp-primary'}`}></i>
+                      )}
+                      <span className="text-[12px] font-bold text-gray-700">{action.label}</span>
+                    </button>
                   ))}
-                </select>
-              </label>
-              <label>
-                <span>候选股数量</span>
-                <input name="top_n" type="number" min={1} max={100} defaultValue={Number(config?.top_n ?? 10)} />
-              </label>
-              <div className="inline-actions inline-actions--compact">
-                <button type="submit" className="button button--primary" disabled={writeLocked || configSaving || shellLoading}>
-                  {configSaving ? '保存中...' : '保存研究参数'}
-                </button>
+                  
+                  <button className="flex flex-col items-center justify-center p-4 rounded-lg erp-border border-dashed hover:bg-red-50 hover:border-erp-danger group transition-all gap-2"
+                          disabled={writeLocked || clearingCache || Boolean(actionPendingName)} onClick={onClearCache}>
+                    <i className="ph ph-trash text-2xl text-gray-300 group-hover:text-erp-danger"></i>
+                    <span className="text-[12px] font-bold text-gray-400 group-hover:text-erp-danger">清空缓存</span>
+                  </button>
+                </div>
+             </div>
+
+             {/* Live Output Console */}
+             <div className="flex-1 bg-white erp-border flex flex-col overflow-hidden">
+                <div className="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700 shrink-0 justify-between">
+                  <span>03. 系统执行日志 (Output Console)</span>
+                  <div className="flex items-center gap-2">
+                     <button onClick={onShareCurrentView} className="text-[10px] bg-white erp-border px-2 py-0.5 rounded hover:bg-gray-50 transition-colors">
+                        <i className="ph ph-share"></i> 复制分享
+                     </button>
+                  </div>
+                </div>
+                <div className="flex-1 bg-[#020617] overflow-y-auto p-4 custom-scrollbar">
+                   {latestAction ? (
+                     <div className="flex flex-col gap-4">
+                        <div className="flex items-center gap-4 border-b border-white/10 pb-3">
+                           <span className={`text-xs px-2 py-0.5 rounded font-bold ${latestAction.ok ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                             {latestAction.ok ? 'SUCCESS' : 'FAILED'}
+                           </span>
+                           <span className="text-white font-mono text-sm uppercase tracking-wider">{latestAction.label || latestAction.actionName}</span>
+                        </div>
+                        <pre className="font-mono text-[12px] text-gray-300 leading-relaxed whitespace-pre-wrap">
+                          {latestAction.output || '> (Empty output received from server)'}
+                        </pre>
+                     </div>
+                   ) : (
+                     <div className="h-full flex flex-col items-center justify-center gap-4 opacity-30 grayscale">
+                        <i className="ph ph-terminal-window text-5xl text-white"></i>
+                        <span className="text-white font-mono text-sm uppercase tracking-widest italic">Waiting for command...</span>
+                     </div>
+                   )}
+                </div>
+             </div>
+          </div>
+        </div>
+
+        {/* Bottom Metadata Section */}
+        <section className="bg-white erp-border p-4 rounded-lg flex items-center gap-8 text-[11px] text-gray-400 shrink-0">
+           <div className="flex flex-col gap-1">
+              <span className="font-bold uppercase tracking-widest text-[9px] text-gray-500">Service Meta:</span>
+              <div className="flex items-center gap-3">
+                 <span>PID: {String(service?.pid || '-')}</span>
+                 <span>HOST: 127.0.0.1</span>
+                 <span>UPTIME: {String(service?.uptime || '-')}s</span>
               </div>
-            </form>
-          </SectionBlock>
-
-          <SectionBlock title="当前参数概览">
-            <PropertyGrid
-              items={[
-                { label: '当前概览', value: shell?.configSummaryText ?? '暂无概览', span: 'double' },
-                { label: '训练起始', value: String(config?.train_start ?? '-') },
-                { label: '训练截止', value: String(config?.train_end ?? '-') },
-                { label: '验证截止', value: String(config?.valid_end ?? '-') },
-                { label: '测试截止', value: String(config?.test_end ?? '-') },
-                { label: '标签周期', value: String(config?.label_col ?? '-') },
-                { label: '候选数量', value: String(config?.top_n ?? '-') },
-              ]}
-            />
-          </SectionBlock>
-        </div>
-      </Panel>
-
-      <Panel title="动作" subtitle="这里是主执行台，所有研究动作都从这里发起。" eyebrow="02" tone="calm" className="panel--table-surface workbench-actions-panel">
-        <div className="split-layout split-layout--workspace">
-          <SectionBlock title="执行动作">
-            <div className="action-stack">
-              {(bootstrap?.actions ?? []).map((action) => (
-                <button
-                  key={action.buttonKey ?? action.actionName}
-                  type="button"
-                  className="button"
-                  disabled={writeLocked || Boolean(actionPendingName)}
-                  onClick={() => onRunAction(action.actionName)}
-                >
-                  {actionPendingName === action.actionName ? action.spinnerText ?? `执行中：${action.label}` : action.label}
-                </button>
-              ))}
-              <button type="button" className="button button--ghost" disabled={writeLocked || clearingCache || Boolean(actionPendingName)} onClick={onClearCache}>
-                {clearingCache ? '清理中...' : '清空页面缓存'}
+           </div>
+           <div className="w-px h-6 bg-gray-200"></div>
+           <div className="flex flex-col gap-1 flex-1">
+              <span className="font-bold uppercase tracking-widest text-[9px] text-gray-500">Snapshot Info:</span>
+              <div className="flex items-center gap-3">
+                 <span>SOURCE: {snapshotSource.label} ({snapshotSource.mode})</span>
+                 <span>FETCHED: {formatDateTime(realtimeSnapshot.fetched_at)}</span>
+                 {snapshotFailedSymbols.length > 0 && <span className="text-erp-warning font-bold">FAILS: {snapshotFailedSymbols.join(' / ')}</span>}
+              </div>
+           </div>
+           <div className="flex items-center gap-2">
+              <button onClick={onResetUiPreferences} className="text-erp-primary hover:underline font-bold uppercase tracking-tighter">
+                Reset UI Layer Preferences
               </button>
-            </div>
-          </SectionBlock>
-
-          <SectionBlock title="最近一次执行结果">
-            {latestAction ? (
-              <SpotlightCard
-                title={latestAction.ok ? '执行完成' : '执行失败'}
-                meta={latestAction.label ?? latestAction.actionName}
-                subtitle={compactActionOutput(latestAction.output)}
-                metrics={[
-                  { label: '动作名称', value: latestAction.actionName },
-                  { label: '执行状态', value: latestAction.ok ? '完成' : '失败', tone: latestAction.ok ? 'good' : 'warn' },
-                ]}
-              />
-            ) : (
-              <div className="empty-state">暂无执行记录</div>
-            )}
-          </SectionBlock>
-        </div>
-
-        <SectionBlock title="完整动作输出" tone="muted" collapsible defaultExpanded={false}>
-          <pre className="log-block">{latestAction?.output || '暂无输出'}</pre>
-        </SectionBlock>
-      </Panel>
-
-      <Panel title="界面" subtitle="当前页面的轻操作，包括分享、重置和缓存控制。" eyebrow="03" className="panel--summary-surface workbench-ui-panel">
-        <div className="split-layout split-layout--workspace">
-          <SectionBlock title="界面操作">
-            <div className="action-stack">
-              <button type="button" className="button" disabled={sharingCurrentView} onClick={onShareCurrentView}>
-                {sharingCurrentView ? '复制中...' : '复制当前页面分享链接'}
-              </button>
-              <button type="button" className="button button--ghost" disabled={resettingUiPreferences} onClick={onResetUiPreferences}>
-                {resettingUiPreferences ? '重置中...' : '重置界面偏好'}
-              </button>
-            </div>
-          </SectionBlock>
-
-          <SectionBlock title="当前界面说明">
-            <PropertyGrid
-              items={[
-                { label: '主题切换', value: '已放到右上角' },
-                { label: '分享链接', value: sharingCurrentView ? '处理中' : '可复制当前页面状态' },
-                { label: '界面偏好', value: resettingUiPreferences ? '处理中' : '可手动重置' },
-              ]}
-            />
-          </SectionBlock>
-        </div>
-      </Panel>
-
-      <SupportPanel title="补充" className="workbench-support-panel">
-        <SectionBlock title="运行补充信息" tone="muted" collapsible defaultExpanded={false}>
-          <PropertyGrid
-            items={[
-              { label: '配置概览', value: shell?.configSummaryText ?? '暂无概览', span: 'double' },
-              { label: '失败股票', value: snapshotFailedSymbols.length ? snapshotFailedSymbols.join(' / ') : '暂无', span: 'double', tone: snapshotFailedSymbols.length ? 'warn' : 'good' },
-              { label: '抓取时间', value: formatDateTime(realtimeSnapshot.fetched_at) },
-              { label: '数据来源', value: String(realtimeSnapshot.served_from ?? '-') },
-            ]}
-          />
-        </SectionBlock>
-      </SupportPanel>
+           </div>
+        </section>
+      </div>
     </div>
   )
 }

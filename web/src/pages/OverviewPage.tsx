@@ -2,27 +2,13 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '../api/client'
-import { Badge } from '../components/Badge'
-import { ComparisonBoard } from '../components/ComparisonBoard'
-import { ContextStrip } from '../components/ContextStrip'
-import { ControlField } from '../components/ControlField'
-import { ControlGrid } from '../components/ControlGrid'
 import { DataTable } from '../components/DataTable'
 import { EntityCell } from '../components/EntityCell'
 import { LineChartCard } from '../components/LineChartCard'
-import { MetricCard } from '../components/MetricCard'
-import { PageFilterBar } from '../components/PageFilterBar'
-import { Panel } from '../components/Panel'
-import { PropertyGrid } from '../components/PropertyGrid'
 import { QueryNotice } from '../components/QueryNotice'
-import { SectionBlock } from '../components/SectionBlock'
-import { SegmentedControl } from '../components/SegmentedControl'
-import { SpotlightCard } from '../components/SpotlightCard'
-import { SupportPanel } from '../components/SupportPanel'
-import { WorkspaceHero } from '../components/WorkspaceHero'
 import { overviewCurvesClient, overviewPageClient, overviewSummaryClient } from '../facades/dashboardPageClient'
 import { usePageSearchState } from '../facades/usePageSearchState'
-import { formatDateTime, formatPercent, formatValue } from '../lib/format'
+import { formatPercent, formatValue } from '../lib/format'
 import type { BootstrapPayload, JsonRecord, OverviewCurvesPayload, OverviewSummaryPayload } from '../types/api'
 
 interface OverviewPageProps {
@@ -107,54 +93,13 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
   const equityCurves = useMemo(() => curvesQuery.data?.equityCurves ?? [], [curvesQuery.data?.equityCurves])
   const bestAnnualized = useMemo(() => findBestRow(comparison, 'daily_portfolio_annualized_return', 'max'), [comparison])
   const bestSharpe = useMemo(() => findBestRow(comparison, 'daily_portfolio_sharpe', 'max'), [comparison])
-  const bestDrawdown = useMemo(() => findBestRow(comparison, 'daily_portfolio_max_drawdown', 'min'), [comparison])
 
   const dailyBarState = summary.daily_bar as Record<string, unknown> | undefined
   const featuresState = summary.features as Record<string, unknown> | undefined
-  const labelsState = summary.labels as Record<string, unknown> | undefined
 
   const curveKeys = useMemo(() => Object.keys(equityCurves[0] ?? {}).filter((key) => key !== 'trade_date'), [equityCurves])
   const curveViewOptions = useMemo(() => buildCurveViewOptions(curveKeys), [curveKeys])
   const activeCurveView = curveViewOptions.find((option) => option.key === curveView) ?? curveViewOptions[0]
-
-  const comparisonColumns = useMemo(
-    () =>
-      comparison.map((row, index) => ({
-        key: `comparison:${index}`,
-        label: String(row.model ?? '-'),
-        description: String(row.split ?? '').toUpperCase(),
-      })),
-    [comparison],
-  )
-
-  const comparisonRows = useMemo(
-    () =>
-      comparisonColumns.length
-        ? [
-            {
-              key: 'annualized',
-              label: '年化收益',
-              values: Object.fromEntries(comparisonColumns.map((column, index) => [column.key, formatPercent(comparison[index]?.daily_portfolio_annualized_return)])),
-            },
-            {
-              key: 'sharpe',
-              label: '夏普比率',
-              values: Object.fromEntries(comparisonColumns.map((column, index) => [column.key, formatValue(comparison[index]?.daily_portfolio_sharpe)])),
-            },
-            {
-              key: 'drawdown',
-              label: '最大回撤',
-              values: Object.fromEntries(comparisonColumns.map((column, index) => [column.key, formatPercent(comparison[index]?.daily_portfolio_max_drawdown)])),
-            },
-            {
-              key: 'hit-rate',
-              label: 'TopN 命中率',
-              values: Object.fromEntries(comparisonColumns.map((column, index) => [column.key, formatPercent(comparison[index]?.top_n_hit_rate)])),
-            },
-          ]
-        : [],
-    [comparison, comparisonColumns],
-  )
 
   const comparisonCellRenderers = useMemo(
     () => ({
@@ -174,203 +119,143 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
     [overviewQuery.data?.selectedSplit, params.split],
   )
 
-  const overviewContextItems = [
-    {
-      label: '当前分段',
-      value: String(overviewQuery.data?.selectedSplit ?? params.split).toUpperCase(),
-      tone: 'brand' as const,
-    },
-    {
-      label: '研究区间',
-      value: summary.date_min && summary.date_max ? `${String(summary.date_min)} ~ ${String(summary.date_max)}` : '-',
-    },
-    {
-      label: '股票覆盖',
-      value: summary.feature_symbols ?? '-',
-      helper: `样本 ${formatValue(summary.feature_rows ?? '-')}`,
-    },
-    {
-      label: '日线状态',
-      value: dailyBarState?.exists ? '可用' : '缺失',
-      helper: String(summary.date_max ?? '-'),
-      tone: dailyBarState?.exists ? ('good' as const) : ('warn' as const),
-    },
-    {
-      label: '最佳夏普',
-      value: bestSharpe?.model ? String(bestSharpe.model).toUpperCase() : '-',
-      helper: formatValue(bestSharpe?.daily_portfolio_sharpe),
-    },
-  ]
-
-  const splitOptions = (bootstrap?.splitNames ?? ['valid', 'test']).map((split) => ({
-    key: split,
-    label: bootstrap?.splitLabels?.[split] ?? split,
-  }))
-
-  const overviewHeroBadges = (
-    <>
-      <Badge tone="brand">{`当前分段 ${(overviewQuery.data?.selectedSplit ?? params.split).toUpperCase()}`}</Badge>
-      <Badge tone={dailyBarState?.exists ? 'good' : 'warn'}>{`日线 ${dailyBarState?.exists ? '可用' : '缺失'}`}</Badge>
-      <Badge tone={featuresState?.exists ? 'good' : 'warn'}>{`特征 ${featuresState?.exists ? '可用' : '缺失'}`}</Badge>
-      <Badge tone={labelsState?.exists ? 'good' : 'warn'}>{`标签 ${labelsState?.exists ? '可用' : '缺失'}`}</Badge>
-    </>
-  )
-
   return (
-    <div className="page-stack">
-      <WorkspaceHero
-        title="研究概览"
-        badges={overviewHeroBadges}
-        controls={
-          <SegmentedControl
-            label="切换概览分段"
-            value={params.split}
-            options={splitOptions}
-            onChange={(value) => updateParams({ split: value })}
-          />
-        }
-      />
+    <div className="flex-1 flex flex-col overflow-hidden text-erp">
+      {/* Local Toolbar */}
+      <div className="h-10 bg-white erp-border-b flex items-center px-3 gap-3 shrink-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
+        <span className="font-bold text-gray-700 mr-2 flex items-center gap-2 shrink-0">
+          <i className="ph-fill ph-chart-line-up text-erp-primary"></i> 
+          研究概览
+        </span>
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+        
+        {/* Quick Filters in Toolbar */}
+        <div className="flex items-center gap-2 text-erp-sm shrink-0">
+          <span className="text-gray-500">数据集:</span>
+          <select 
+            className="border border-gray-300 rounded px-1 py-0.5 outline-none focus:border-erp-primary bg-white font-medium"
+            value={params.split} 
+            onChange={(event) => updateParams({ split: event.target.value })}
+          >
+            {(bootstrap?.splitNames ?? ['valid', 'test']).map((split) => (
+              <option key={split} value={split}>
+                {(bootstrap?.splitLabels?.[split] ?? split).toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      <div className="metric-grid metric-grid--four">
-        <MetricCard label="特征样本数" value={summary.feature_rows ?? 0} />
-        <MetricCard label="股票覆盖数" value={summary.feature_symbols ?? 0} />
-        <MetricCard
-          label="最佳年化收益"
-          value={formatPercent(bestAnnualized?.daily_portfolio_annualized_return)}
-          helper={bestAnnualized?.model ? String(bestAnnualized.model).toUpperCase() : '-'}
-          tone="good"
-        />
-        <MetricCard
-          label="最佳夏普"
-          value={formatValue(bestSharpe?.daily_portfolio_sharpe)}
-          helper={bestSharpe?.model ? String(bestSharpe.model).toUpperCase() : '-'}
-          tone="good"
-        />
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+
+        {/* State Indicators */}
+        <div className="flex items-center gap-3 text-erp-sm shrink-0">
+           <div className="flex items-center gap-1">
+             <span className="text-gray-500 text-[11px]">日线:</span>
+             <span className={`font-bold ${dailyBarState?.exists ? 'text-erp-success' : 'text-erp-danger'}`}>
+               {dailyBarState?.exists ? 'READY' : 'MISSING'}
+             </span>
+           </div>
+           <div className="flex items-center gap-1">
+             <span className="text-gray-500 text-[11px]">特征:</span>
+             <span className={`font-bold ${featuresState?.exists ? 'text-erp-success' : 'text-erp-danger'}`}>
+               {featuresState?.exists ? 'READY' : 'MISSING'}
+             </span>
+           </div>
+        </div>
+        
+        <div className="ml-auto flex items-center gap-4 text-erp-sm shrink-0">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">研究区间:</span> 
+            <span className="font-bold font-mono">
+              {summary.date_min && summary.date_max ? `${String(summary.date_min)} ~ ${String(summary.date_max)}` : '-'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">最佳夏普:</span> 
+            <span className="font-bold font-mono text-erp-success">
+              {bestSharpe?.model ? String(bestSharpe.model).toUpperCase() : '-'} ({formatValue(bestSharpe?.daily_portfolio_sharpe)})
+            </span>
+          </div>
+        </div>
       </div>
 
-      <Panel title="数据" subtitle={summary.date_max ? `研究区间 ${String(summary.date_min)} 至 ${String(summary.date_max)}` : undefined} tone="warm" className="panel--summary-surface">
+      {/* Main Content Area: High Density Grid & Charts */}
+      <div className="flex-1 bg-white p-8 overflow-y-auto flex flex-col gap-12">
         <QueryNotice isLoading={overviewQuery.isLoading || curvesQuery.isLoading} error={overviewQuery.error ?? curvesQuery.error} />
 
-        <SectionBlock title="当前概览">
-          <SpotlightCard
-            title={String(overviewQuery.data?.selectedSplit ?? params.split).toUpperCase()}
-            meta="当前比较分段"
-            badges={[
-              { label: `日线 ${dailyBarState?.exists ? '可用' : '缺失'}`, tone: dailyBarState?.exists ? 'good' : 'warn' },
-              { label: `特征 ${featuresState?.exists ? '可用' : '缺失'}`, tone: featuresState?.exists ? 'good' : 'warn' },
-              { label: `标签 ${labelsState?.exists ? '可用' : '缺失'}`, tone: labelsState?.exists ? 'good' : 'warn' },
-            ]}
-            metrics={[
-              { label: '股票覆盖数', value: summary.feature_symbols ?? 0 },
-              { label: '特征样本数', value: summary.feature_rows ?? 0 },
-              { label: '最佳年化', value: formatPercent(bestAnnualized?.daily_portfolio_annualized_return), tone: 'good' },
-              { label: '最佳夏普', value: bestSharpe?.daily_portfolio_sharpe ?? '-', tone: 'good' },
-              { label: '最浅回撤', value: formatPercent(bestDrawdown?.daily_portfolio_max_drawdown), tone: 'warn' },
-            ]}
-          />
-        </SectionBlock>
+        {/* Top Summary Row - Large Numbers */}
+        <div className="flex items-center gap-16 shrink-0 border-b erp-border pb-8">
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">特征样本总数</span>
+            <span className="text-4xl font-mono font-bold leading-none">{formatValue(summary.feature_rows ?? 0)}</span>
+          </div>
+          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">股票覆盖数</span>
+            <span className="text-4xl font-mono font-bold leading-none">{formatValue(summary.feature_symbols ?? 0)}</span>
+          </div>
+          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">最佳年化收益</span>
+            <span className="text-4xl font-mono font-bold leading-none text-erp-danger">{formatPercent(bestAnnualized?.daily_portfolio_annualized_return)}</span>
+            <span className="text-[10px] text-gray-400 mt-2 uppercase font-bold">{String(bestAnnualized?.model ?? '-')}</span>
+          </div>
+          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">平均换手率</span>
+            <span className="text-4xl font-mono font-bold leading-none text-gray-700">{formatPercent(summary.avg_turnover_ratio)}</span>
+          </div>
+        </div>
 
-        <ContextStrip items={overviewContextItems} />
-
-        <PageFilterBar title="切换概览分段">
-          <ControlGrid variant="double">
-            <ControlField label="数据集">
-              <select value={params.split} onChange={(event) => updateParams({ split: event.target.value })}>
-                {(bootstrap?.splitNames ?? ['valid', 'test']).map((split) => (
-                  <option key={split} value={split}>
-                    {bootstrap?.splitLabels?.[split] ?? split}
-                  </option>
-                ))}
-              </select>
-            </ControlField>
-          </ControlGrid>
-        </PageFilterBar>
-      </Panel>
-
-      <Panel title="比较" tone="calm" className="panel--summary-surface">
-        <ComparisonBoard columns={comparisonColumns} rows={comparisonRows} />
-      </Panel>
-
-      <Panel title="模型" tone="calm" className="panel--table-surface">
-        <DataTable
-          rows={comparison}
-          columns={COMPARISON_COLUMNS}
-          columnLabels={COMPARISON_COLUMN_LABELS}
-          storageKey="overview-comparison"
-          loading={overviewQuery.isLoading}
-          emptyText="暂无模型结果"
-          stickyFirstColumn
-          cellRenderers={comparisonCellRenderers}
-        />
-      </Panel>
-
-      <Panel title="曲线" tone="calm" className="panel--table-surface">
-        <LineChartCard
-          data={equityCurves}
-          xKey="trade_date"
-          lineKeys={activeCurveView?.lineKeys}
-          title="模型资金曲线"
-          subtitle={activeCurveView?.subtitle ?? '比较不同模型在同一分段上的资金曲线走势。'}
-          actions={
-            curveViewOptions.length > 1 ? (
-              <SegmentedControl
-                label="切换净值预设"
-                value={activeCurveView?.key ?? 'all'}
-                options={curveViewOptions.map((option) => ({ key: option.key, label: option.label }))}
-                onChange={setCurveView}
+        {/* Comparison Grid Section */}
+        <section className="flex flex-col gap-6">
+           <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3">
+             <i className="ph ph-table"></i> 多模型绩效横向对账表 (Comparative Analytics)
+           </h4>
+           <div className="erp-border rounded-lg overflow-hidden min-h-[300px]">
+              <DataTable
+                rows={comparison}
+                columns={COMPARISON_COLUMNS}
+                columnLabels={COMPARISON_COLUMN_LABELS}
+                storageKey="overview-comparison"
+                loading={overviewQuery.isLoading}
+                emptyText="暂无模型结果"
+                stickyFirstColumn
+                cellRenderers={comparisonCellRenderers}
               />
-            ) : null
-          }
-          emptyText="暂无净值曲线"
-        />
-      </Panel>
+           </div>
+        </section>
 
-      <div className="split-layout">
-        <SupportPanel title="数据补充">
-          <SectionBlock title="面板状态" tone="muted" collapsible defaultExpanded={false}>
-            <PropertyGrid
-              items={[
-                { label: '日线面板体积', value: formatValue(dailyBarState?.size_mb ? `${dailyBarState.size_mb} MB` : '-') },
-                { label: '日线更新时间', value: formatDateTime(dailyBarState?.updated) },
-                { label: '特征面板体积', value: formatValue(featuresState?.size_mb ? `${featuresState.size_mb} MB` : '-') },
-                { label: '特征更新时间', value: formatDateTime(featuresState?.updated) },
-                { label: '标签面板体积', value: formatValue(labelsState?.size_mb ? `${labelsState.size_mb} MB` : '-') },
-                { label: '标签更新时间', value: formatDateTime(labelsState?.updated) },
-                { label: '缓存股票数', value: formatValue(summary.cached_symbols ?? 0) },
-                { label: '研究区间', value: `${formatValue(summary.date_min)} 至 ${formatValue(summary.date_max)}`, span: 'double' },
-              ]}
-            />
-          </SectionBlock>
-        </SupportPanel>
-
-        <SupportPanel title="模型补充">
-          <SectionBlock title="最优解概览" tone="muted" collapsible defaultExpanded={false}>
-            <PropertyGrid
-              items={[
-                {
-                  label: '最佳年化模型',
-                  value: bestAnnualized ? `${formatValue(bestAnnualized.model)} / ${formatValue(bestAnnualized.split)}` : '-',
-                  helper: `年化 ${formatPercent(bestAnnualized?.daily_portfolio_annualized_return)}，回撤 ${formatPercent(bestAnnualized?.daily_portfolio_max_drawdown)}`,
-                  span: 'double',
-                  tone: 'good',
-                },
-                {
-                  label: '最佳夏普模型',
-                  value: bestSharpe ? `${formatValue(bestSharpe.model)} / ${formatValue(bestSharpe.split)}` : '-',
-                  helper: `夏普 ${formatValue(bestSharpe?.daily_portfolio_sharpe)}，命中率 ${formatPercent(bestSharpe?.top_n_hit_rate)}`,
-                  span: 'double',
-                  tone: 'good',
-                },
-                {
-                  label: '最浅回撤模型',
-                  value: bestDrawdown ? `${formatValue(bestDrawdown.model)} / ${formatValue(bestDrawdown.split)}` : '-',
-                  helper: `最大回撤 ${formatPercent(bestDrawdown?.daily_portfolio_max_drawdown)}，换手 ${formatPercent(bestDrawdown?.avg_turnover_ratio)}`,
-                  span: 'double',
-                },
-              ]}
-            />
-          </SectionBlock>
-        </SupportPanel>
+        {/* Equity Curves Section */}
+        <section className="flex flex-col gap-6 border-t erp-border pt-10">
+           <div className="flex items-center justify-between">
+              <h4 className="text-erp-primary font-bold text-sm flex items-center gap-2 border-l-4 border-erp-primary pl-3">
+                <i className="ph ph-chart-line"></i> 模型净值曲线对比 (Cumulative Equity)
+              </h4>
+              {curveViewOptions.length > 1 && (
+                <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-md erp-border">
+                  {curveViewOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      onClick={() => setCurveView(option.key)}
+                      className={`px-3 py-1 text-[11px] rounded transition-all ${activeCurveView.key === option.key ? 'bg-white shadow-sm font-bold text-erp-primary border erp-border' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+           </div>
+           <div className="erp-border rounded-lg p-6 bg-gray-50/30 h-[500px]">
+             <LineChartCard
+                data={equityCurves}
+                xKey="trade_date"
+                lineKeys={activeCurveView?.lineKeys}
+                title=""
+                emptyText="暂无净值曲线"
+              />
+           </div>
+        </section>
       </div>
     </div>
   )

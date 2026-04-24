@@ -2,19 +2,9 @@ import { useQuery } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { apiGet } from '../api/client'
-import { Badge } from '../components/Badge'
-import { ContextStrip } from '../components/ContextStrip'
-import { ControlField } from '../components/ControlField'
-import { ControlGrid } from '../components/ControlGrid'
 import { DataTable } from '../components/DataTable'
 import { EntityCell } from '../components/EntityCell'
-import { MetricCard } from '../components/MetricCard'
-import { PageFilterBar } from '../components/PageFilterBar'
-import { Panel } from '../components/Panel'
 import { QueryNotice } from '../components/QueryNotice'
-import { SectionBlock } from '../components/SectionBlock'
-import { SpotlightCard } from '../components/SpotlightCard'
-import { WorkspaceHero } from '../components/WorkspaceHero'
 import { aiReviewPageClient, aiReviewSummaryClient } from '../facades/dashboardPageClient'
 import { usePageSearchState } from '../facades/usePageSearchState'
 import { formatDate } from '../lib/format'
@@ -82,41 +72,10 @@ const AI_CANDIDATE_CELL_RENDERERS = {
   ),
 }
 
-function renderSummaryPanel(
-  scope: 'inference' | 'historical',
-  title: string,
-  panel: AiReviewSummaryPayload['inference'] | AiReviewSummaryPayload['historical'] | undefined,
-  emptyText: string,
-  onRowClick: (row: JsonRecord) => void,
-) {
-  const storagePrefix = scope === 'inference' ? 'ai-review-inference' : 'ai-review-historical'
-
-  return (
-    <Panel title={title} className="panel--summary-surface ai-review-pool-panel">
-      <SectionBlock title="候选总表" description="先比较列表，再点入单票详情页。">
-        <DataTable
-          rows={panel?.candidates ?? []}
-          columns={CANDIDATE_COLUMNS}
-          columnLabels={CANDIDATE_COLUMN_LABELS}
-          storageKey={`${storagePrefix}-candidates`}
-          viewPresets={AI_VIEW_PRESETS}
-          defaultPresetKey="thesis"
-          emptyText={emptyText}
-          stickyFirstColumn
-          getRowId={(row) => String(row.ts_code ?? '')}
-          onRowClick={onRowClick}
-          rowTitle="点击进入详情"
-          cellRenderers={AI_CANDIDATE_CELL_RENDERERS}
-        />
-      </SectionBlock>
-    </Panel>
-  )
-}
-
 export function AiReviewPage() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { params, updateParams } = usePageSearchState(aiReviewPageClient)
+  const { params } = usePageSearchState(aiReviewPageClient)
 
   const summaryQuery = useQuery({
     queryKey: aiReviewSummaryClient.queryKey(params),
@@ -126,115 +85,106 @@ export function AiReviewPage() {
   const inference = summaryQuery.data?.inference
   const historical = summaryQuery.data?.historical
 
-  const aiContextItems = [
-    {
-      label: '最新推理池',
-      value: inference?.candidateCount ?? 0,
-      helper: formatDate(inference?.candidates?.[0]?.trade_date),
-      tone: 'brand' as const,
-    },
-    {
-      label: '历史验证池',
-      value: historical?.candidateCount ?? 0,
-      helper: formatDate(historical?.candidates?.[0]?.trade_date),
-    },
-    {
-      label: '当前推理定位',
-      value: params.inference || '-',
-    },
-    {
-      label: '当前验证定位',
-      value: params.historical || '-',
-    },
-  ]
-
-  const aiHeroBadges = (
-    <>
-      <Badge tone="brand">{`最新推理 ${inference?.candidateCount ?? 0} 只`}</Badge>
-      <Badge tone="default">{`历史验证 ${historical?.candidateCount ?? 0} 只`}</Badge>
-      <Badge tone="brand">列表优先</Badge>
-    </>
-  )
-
   return (
-    <div className="page-stack">
-      <WorkspaceHero
-        title="AI 分析对照"
-        className="ai-review-anchor-hero"
-        description="首屏先比较两个池子的列表与数量，再点击单票进入详情页，不会一上来就拉双边详情。"
-        badges={aiHeroBadges}
-      />
+    <div className="flex-1 flex flex-col overflow-hidden text-erp">
+      {/* Local Toolbar */}
+      <div className="h-10 bg-white erp-border-b flex items-center px-3 gap-3 shrink-0 overflow-x-auto overflow-y-hidden whitespace-nowrap">
+        <span className="font-bold text-gray-700 mr-2 flex items-center gap-2 shrink-0">
+          <i className="ph-fill ph-brain text-erp-primary"></i> 
+          AI 智能分析对照
+        </span>
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+        
+        {/* State Indicators */}
+        <div className="flex items-center gap-4 text-erp-sm shrink-0">
+           <div className="flex items-center gap-1">
+             <span className="text-gray-500">最新推理:</span>
+             <span className="font-bold text-erp-primary">{inference?.candidateCount ?? 0} 只</span>
+             <span className="text-[10px] text-gray-400">({formatDate(inference?.candidates?.[0]?.trade_date)})</span>
+           </div>
+           <div className="flex items-center gap-1">
+             <span className="text-gray-500">历史验证:</span>
+             <span className="font-bold">{historical?.candidateCount ?? 0} 只</span>
+             <span className="text-[10px] text-gray-400">({formatDate(historical?.candidates?.[0]?.trade_date)})</span>
+           </div>
+        </div>
 
-      <div className="metric-grid metric-grid--four">
-        <MetricCard label="最新推理池" value={inference?.candidateCount ?? 0} />
-        <MetricCard label="历史验证池" value={historical?.candidateCount ?? 0} />
-        <MetricCard label="当前推理定位" value={params.inference || '-'} />
-        <MetricCard label="当前验证定位" value={params.historical || '-'} />
+        <div className="w-px h-5 bg-gray-300 mx-1 shrink-0"></div>
+
+        {/* Quick Jumper in Toolbar */}
+        <div className="flex items-center gap-2 text-erp-sm shrink-0">
+          <span className="text-gray-500">定位定位:</span>
+          <select 
+            className="border border-gray-300 rounded px-1 py-0.5 outline-none focus:border-erp-primary bg-white max-w-[150px]"
+            value={params.inference} 
+            onChange={(event) => event.target.value && navigate({ pathname: buildAiReviewPath(event.target.value, 'inference'), search: location.search })}
+          >
+            <option value="">快速跳转推理详情...</option>
+            {(inference?.candidates ?? []).map((row) => (
+              <option key={String(row.ts_code)} value={String(row.ts_code)}>{buildOptionLabel(row)}</option>
+            ))}
+          </select>
+        </div>
+        
+        <div className="ml-auto flex items-center gap-4 text-erp-sm shrink-0">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">双池总数:</span> 
+            <span className="font-bold font-mono">{(inference?.candidateCount ?? 0) + (historical?.candidateCount ?? 0)}</span>
+          </div>
+        </div>
       </div>
 
-      <Panel title="筛选" subtitle="两池都先看列表，点一行再进入详情页。" tone="warm" className="panel--summary-surface ai-review-switch-panel">
+      {/* Main Workspace Area: Dual High Density Grids */}
+      <div className="flex-1 bg-erp-bg p-2 overflow-hidden flex gap-2">
         <QueryNotice isLoading={summaryQuery.isLoading} error={summaryQuery.error} />
-        <SectionBlock title="列表模式" tone="emphasis">
-          <SpotlightCard
-            title="列表优先"
-            meta="详情改为独立页面"
-            subtitle="不再首屏自动请求双边 detail。"
-            metrics={[
-              { label: '最新推理池', value: inference?.candidateCount ?? 0 },
-              { label: '历史验证池', value: historical?.candidateCount ?? 0 },
-            ]}
-          />
-        </SectionBlock>
-        <ContextStrip items={aiContextItems} />
-        <PageFilterBar title="定位单票">
-          <ControlGrid variant="double">
-            <ControlField label="最新推理股票">
-              <select
-                value={params.inference}
-                onChange={(event) => updateParams({ inference: event.target.value })}
-              >
-                <option value="">未选择</option>
-                {(inference?.candidates ?? []).map((row) => {
-                  const value = String(row.ts_code ?? '')
-                  return (
-                    <option key={value} value={value}>
-                      {buildOptionLabel(row)}
-                    </option>
-                  )
-                })}
-              </select>
-            </ControlField>
-            <ControlField label="历史验证股票">
-              <select
-                value={params.historical}
-                onChange={(event) => updateParams({ historical: event.target.value })}
-              >
-                <option value="">未选择</option>
-                {(historical?.candidates ?? []).map((row) => {
-                  const value = String(row.ts_code ?? '')
-                  return (
-                    <option key={value} value={value}>
-                      {buildOptionLabel(row)}
-                    </option>
-                  )
-                })}
-              </select>
-            </ControlField>
-          </ControlGrid>
-          <div className="inline-actions inline-actions--compact">
-            <button type="button" className="button button--ghost" onClick={() => params.inference && navigate({ pathname: buildAiReviewPath(params.inference, 'inference'), search: location.search })} disabled={!params.inference}>
-              查看推理详情
-            </button>
-            <button type="button" className="button button--ghost" onClick={() => params.historical && navigate({ pathname: buildAiReviewPath(params.historical, 'historical'), search: location.search })} disabled={!params.historical}>
-              查看验证详情
-            </button>
-          </div>
-        </PageFilterBar>
-      </Panel>
+        
+        {/* Left Column: Inference */}
+        <div className="flex-1 bg-white erp-border flex flex-col overflow-hidden">
+           <div className="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700 shrink-0">
+             <i className="ph ph-lightning mr-2 text-erp-primary"></i> 
+             最新推理池 (Current Inference)
+           </div>
+           <div className="flex-1 overflow-auto relative">
+              <DataTable
+                rows={inference?.candidates ?? []}
+                columns={CANDIDATE_COLUMNS}
+                columnLabels={CANDIDATE_COLUMN_LABELS}
+                storageKey="ai-review-inference-candidates"
+                viewPresets={AI_VIEW_PRESETS}
+                defaultPresetKey="thesis"
+                emptyText="暂无最新推理"
+                stickyFirstColumn
+                getRowId={(row) => String(row.ts_code ?? '')}
+                onRowClick={(row) => navigate({ pathname: buildAiReviewPath(String(row.ts_code ?? ''), 'inference'), search: location.search })}
+                rowTitle="点击进入详情"
+                cellRenderers={AI_CANDIDATE_CELL_RENDERERS}
+              />
+           </div>
+        </div>
 
-      <div className="split-layout">
-        {renderSummaryPanel('inference', '推理列表', inference, '暂无最新推理候选池', (row) => navigate({ pathname: buildAiReviewPath(String(row.ts_code ?? ''), 'inference'), search: location.search }))}
-        {renderSummaryPanel('historical', '验证列表', historical, '暂无历史验证候选池', (row) => navigate({ pathname: buildAiReviewPath(String(row.ts_code ?? ''), 'historical'), search: location.search }))}
+        {/* Right Column: Historical */}
+        <div className="flex-1 bg-white erp-border flex flex-col overflow-hidden">
+           <div className="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-semibold text-gray-700 shrink-0">
+             <i className="ph ph-clock-counter-clockwise mr-2"></i> 
+             历史验证池 (Historical Validation)
+           </div>
+           <div className="flex-1 overflow-auto relative text-erp">
+              <DataTable
+                rows={historical?.candidates ?? []}
+                columns={CANDIDATE_COLUMNS}
+                columnLabels={CANDIDATE_COLUMN_LABELS}
+                storageKey="ai-review-historical-candidates"
+                viewPresets={AI_VIEW_PRESETS}
+                defaultPresetKey="thesis"
+                emptyText="暂无历史验证"
+                stickyFirstColumn
+                getRowId={(row) => String(row.ts_code ?? '')}
+                onRowClick={(row) => navigate({ pathname: buildAiReviewPath(String(row.ts_code ?? ''), 'historical'), search: location.search })}
+                rowTitle="点击进入详情"
+                cellRenderers={AI_CANDIDATE_CELL_RENDERERS}
+              />
+           </div>
+        </div>
       </div>
     </div>
   )

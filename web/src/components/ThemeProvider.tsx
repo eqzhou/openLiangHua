@@ -8,6 +8,7 @@ export function ThemeProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
+    // We also set the standard color-scheme for native elements
     document.documentElement.style.colorScheme = theme
     writeThemeMode(theme)
   }, [theme])

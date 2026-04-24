@@ -327,6 +327,8 @@ def _read_json(path: Path) -> dict:
 def _read_jsonl_records(path_text: str) -> list[dict]:
     if not path_text:
         return []
+    if str(path_text).startswith("artifact://"):
+        return []
     path = Path(path_text)
     if not path.exists():
         return []
