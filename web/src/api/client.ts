@@ -74,3 +74,14 @@ export async function apiPut<T>(path: string, payload: unknown): Promise<T> {
   })
   return parseJson<T>(response)
 }
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const response = await fetch(path, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+  return parseJson<T>(response)
+}

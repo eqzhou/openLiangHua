@@ -167,34 +167,29 @@ export function AppLayout({
 
       {/* Main Workspace */}
       <div className="flex flex-1 overflow-hidden relative">
-        {/* Left Sidebar: Tree View */}
-        <div className={`${sidebarCollapsed ? 'w-0 opacity-0 translate-x-[-100%]' : 'w-64 opacity-100 translate-x-0'} bg-white flex flex-col erp-border-r shrink-0 transition-all duration-300 ease-in-out z-30`}>
-          <div className="h-8 bg-gray-100 erp-border-b flex items-center px-3 font-bold text-erp-sm text-gray-500 shrink-0 uppercase tracking-widest">
-            导航资源树
+        {/* Left Sidebar: Modern Menu View */}
+        <div className={`${sidebarCollapsed ? 'w-0 opacity-0 translate-x-[-100%]' : 'w-64 opacity-100 translate-x-0'} bg-white flex flex-col erp-border-r shrink-0 transition-all duration-300 ease-in-out z-30 shadow-[4px_0_24px_rgba(0,0,0,0.02)]`}>
+          <div className="h-12 flex items-center px-6 font-bold text-xs text-gray-400 uppercase tracking-widest shrink-0 select-none">
+            系统菜单
           </div>
-          <div className="flex-1 overflow-y-auto py-3 pb-10 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto py-2 pb-10 custom-scrollbar flex flex-col gap-4">
             {navSections.map((section) => (
-              <div className="mb-2" key={section.key}>
+              <div key={section.key}>
                 <div
-                  className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-erp-bg transition-colors group"
+                  className="flex items-center justify-between px-6 py-1.5 cursor-pointer group select-none"
                   onClick={() => toggleSection(section.key)}
                 >
+                  <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider group-hover:text-gray-600 transition-colors">{section.label}</span>
                   <i
-                    className={`ph-bold text-gray-400 text-[10px] w-3 transition-transform duration-200 ${
+                    className={`ph text-gray-400 text-[12px] transition-transform duration-200 ${
                       treeOpen[section.key] ? 'rotate-90' : 'rotate-0'
                     }`}
                   >
-                    <i className="ph ph-caret-right"></i>
+                    <i className="ph-bold ph-caret-right"></i>
                   </i>
-                  <i
-                    className={`ph-fill ${
-                      treeOpen[section.key] ? 'ph-folder-open' : 'ph-folder'
-                    } text-yellow-500 text-[16px] group-hover:scale-110 transition-transform`}
-                  ></i>
-                  <span className="font-bold text-gray-600 text-[12px]">{section.label}</span>
                 </div>
-                <div className={`overflow-hidden transition-all duration-300 ${treeOpen[section.key] ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                  <div className="pl-8 flex flex-col gap-0.5 py-1">
+                <div className={`overflow-hidden transition-all duration-300 ${treeOpen[section.key] ? 'max-h-[500px] opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
+                  <div className="px-3 flex flex-col gap-1">
                     {section.items.map((item) => {
                       const isActive =
                         item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to)
@@ -202,19 +197,19 @@ export function AppLayout({
                         <NavLink
                           key={item.to}
                           to={item.to}
-                          className={`flex items-center gap-2 px-3 py-1.5 rounded-l-md transition-all relative ${
+                          className={`flex items-center gap-3 px-3 py-2 rounded-md transition-all duration-200 relative ${
                             isActive
-                              ? 'bg-erp-primary text-white shadow-sm translate-x-[-2px]'
-                              : 'hover:bg-gray-100 text-gray-600 border-l-2 border-transparent hover:border-erp-primary/30'
+                              ? 'bg-erp-primary/10 text-erp-primary font-bold'
+                              : 'hover:bg-gray-100 text-gray-600 hover:text-gray-900'
                           }`}
                         >
-                          <i className={`ph ${isActive ? item.icon.replace('ph-', 'ph-fill ph-') : item.icon} ${isActive ? 'text-white' : 'text-gray-400'} text-[16px]`}></i>
-                          <span className={`text-[13px] ${isActive ? 'font-bold' : ''}`}>
+                          {isActive && (
+                             <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-1/2 bg-erp-primary rounded-r-full"></div>
+                          )}
+                          <i className={`ph ${isActive ? item.icon.replace('ph-', 'ph-fill ph-') : item.icon} ${isActive ? 'text-erp-primary' : 'text-gray-400 group-hover:text-gray-600'} text-[18px]`}></i>
+                          <span className="text-[13px]">
                             {item.label}
                           </span>
-                          {isActive && (
-                             <div className="absolute right-0 top-0 bottom-0 w-1 bg-white/20 rounded-l-full"></div>
-                          )}
                         </NavLink>
                       )
                     })}
@@ -224,7 +219,7 @@ export function AppLayout({
             ))}
           </div>
           
-          <div className="p-4 erp-border-t bg-gray-50 text-[10px] text-gray-400 font-mono">
+          <div className="p-4 erp-border-t bg-gray-50/50 text-[10px] text-gray-400 font-mono flex items-center justify-center">
              v2.4.0-STABLE | BUILD: 20260422
           </div>
         </div>

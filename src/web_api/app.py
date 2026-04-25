@@ -62,7 +62,7 @@ from src.web_api.auth import (
     set_auth_cookie,
 )
 from src.web_api.settings import ApiSettings, get_api_settings
-
+from src.web_api.routers import auth_router, watchlist_router
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=100)
@@ -83,6 +83,8 @@ def _build_auth_payload(user: AuthenticatedUser | None) -> dict[str, Any]:
 
 settings = get_api_settings()
 app = FastAPI(title="OpenLianghua Research API", version="0.1.0")
+app.include_router(auth_router)
+app.include_router(watchlist_router)
 logger = logging.getLogger("openlianghua.web_api")
 
 class ApiError(Exception):

@@ -345,30 +345,14 @@ def load_latest_successful_panel_run(*, data_source: str) -> dict[str, Any]:
 
 def load_research_panel_summary(*, data_source: str) -> dict[str, Any]:
     ensure_research_panel_schema()
-    with connect_database(use_dict_rows=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select
-                    count(*) as row_count,
-                    count(distinct ts_code) as symbol_count,
-                    min(trade_date) as date_min,
-                    max(trade_date) as date_max
-                from research.panel
-                where data_source = %s
-                """,
-                (data_source,),
-            )
-            row = cur.fetchone()
-        conn.commit()
-
-    if not row or not row.get("row_count"):
+    latest_run = load_latest_successful_panel_run(data_source=data_source)
+    if not latest_run:
         return {}
     return {
-        "row_count": int(row.get("row_count", 0) or 0),
-        "symbol_count": int(row.get("symbol_count", 0) or 0),
-        "date_min": str(pd.Timestamp(row["date_min"]).date()) if row.get("date_min") is not None else None,
-        "date_max": str(pd.Timestamp(row["date_max"]).date()) if row.get("date_max") is not None else None,
+        "row_count": int(latest_run.get("row_count", 0) or 0),
+        "symbol_count": int(latest_run.get("symbol_count", 0) or 0),
+        "date_min": str(pd.Timestamp(latest_run["date_min"]).date()) if latest_run.get("date_min") is not None else None,
+        "date_max": str(pd.Timestamp(latest_run["date_max"]).date()) if latest_run.get("date_max") is not None else None,
     }
 
 

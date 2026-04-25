@@ -1,11 +1,12 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
 
-import { apiGet, apiPost } from '../api/client'
+import { apiGet, apiPost, apiDelete } from '../api/client'
 import { DataTable } from '../components/DataTable'
 import { EntityCell } from '../components/EntityCell'
 import { useToast } from '../components/ToastProvider'
+import { WatchlistEditDialog, type WatchlistEditItem } from '../components/WatchlistAddDialog'
 import { realtimeRefreshClient, watchlistPageClient, watchlistSummaryClient } from '../facades/dashboardPageClient'
 import { usePageSearchState } from '../facades/usePageSearchState'
 import { normalizeRealtimeFailedSymbols } from '../lib/realtime'
@@ -18,8 +19,8 @@ interface WatchlistPageProps {
 }
 
 const WATCHLIST_COLUMNS = [
-  'source_tags',
   'name',
+  'source_tags',
   'industry',
   'mark_price',
   'realtime_price',
@@ -29,6 +30,7 @@ const WATCHLIST_COLUMNS = [
   'inference_ensemble_rank',
   'premarket_plan',
   'llm_latest_status',
+  'actions',
 ]
 
 const WATCHLIST_COLUMN_LABELS = {
@@ -43,6 +45,7 @@ const WATCHLIST_COLUMN_LABELS = {
   inference_ensemble_rank: '最新推理排名',
   premarket_plan: '执行建议',
   llm_latest_status: '分析状态',
+  actions: '操作',
 }
 
 const DEFAULT_SCOPE_LABELS: Record<string, string> = {
@@ -55,8 +58,8 @@ const DEFAULT_SCOPE_LABELS: Record<string, string> = {
 }
 
 const WATCHLIST_VIEW_PRESETS = [
-  { key: 'trading', label: '交易', columns: ['name', 'realtime_price', 'realtime_pct_chg', 'mark_price', 'premarket_plan', 'llm_latest_status'] },
-  { key: 'ranking', label: '排名', columns: ['source_tags', 'name', 'industry', 'ensemble_rank', 'inference_ensemble_rank', 'premarket_plan'] },
+  { key: 'trading', label: '交易', columns: ['name', 'realtime_price', 'realtime_pct_chg', 'mark_price', 'premarket_plan', 'llm_latest_status', 'actions'] },
+  { key: 'ranking', label: '排名', columns: ['source_tags', 'name', 'industry', 'ensemble_rank', 'inference_ensemble_rank', 'premarket_plan', 'actions'] },
 ]
 
 function toErrorMessage(error: unknown): string {
@@ -72,6 +75,9 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
   const navigate = useNavigate()
   const { pushToast } = useToast()
   const { params, updateParams } = usePageSearchState(watchlistPageClient)
+  
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [editingItem, setEditingItem] = useState<WatchlistEditItem | null>(null)
 
   const summaryQuery = useQuery({
     queryKey: watchlistSummaryClient.queryKey(params),
@@ -96,28 +102,78 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
     },
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: (args: { ts_code: string, type: string }) => apiDelete(`/api/watchlist-config/items/${args.ts_code}/${args.type}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['watchlist-summary'] })
+      pushToast({ tone: 'success', title: '删除成功' })
+    },
+    onError: (error) => {
+      pushToast({ tone: 'error', title: '删除失败', description: toErrorMessage(error) })
+    }
+  })
+
   const records = useMemo(() => summaryQuery.data?.records ?? [], [summaryQuery.data?.records])
   const scopeLabels = bootstrap?.watchScopes ? { ...bootstrap.watchScopes, ...DEFAULT_SCOPE_LABELS } : DEFAULT_SCOPE_LABELS
   const realtimeStatus = summaryQuery.data?.realtimeStatus ?? {}
   const failedSymbols = useMemo(() => normalizeRealtimeFailedSymbols(realtimeStatus.failed_symbols), [realtimeStatus.failed_symbols])
   const writeLocked = !authenticated
 
-  const watchlistCellRenderers = useMemo(
-    () => ({
-      name: (row: JsonRecord) => (
-        <EntityCell
-          title={String(row.name ?? '-')}
-          subtitle={String(row.ts_code ?? '')}
-          meta={String(row.industry || row.source_category || '')}
-          badges={[
-            row.is_overlay_selected ? { label: '精选', tone: 'good' as const } : null,
-            row.is_inference_overlay_selected ? { label: '最新', tone: 'brand' as const } : null,
-          ].filter(Boolean) as Array<{ label: string; tone?: 'default' | 'brand' | 'good' | 'warn' }>}
-        />
-      ),
-    }),
-    [],
-  )
+  const handleEdit = (row: JsonRecord, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const type = String(row.entry_group ?? '') === '重点关注' ? 'focus' : 'holding'
+    setEditingItem({
+      ts_code: String(row.ts_code ?? ''),
+      name: String(row.name ?? ''),
+      type: type,
+      cost: row.cost_basis ? Number(row.cost_basis) : null,
+      shares: row.shares ? Number(row.shares) : null,
+      note: String(row.focus_note ?? ''),
+    })
+    setAddDialogOpen(true)
+  }
+
+  const handleDelete = (row: JsonRecord, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (window.confirm(`确定要从数据库中删除 ${row.name || row.ts_code} 吗？`)) {
+      const type = String(row.entry_group ?? '') === '重点关注' ? 'focus' : 'holding'
+      deleteMutation.mutate({ ts_code: String(row.ts_code ?? ''), type })
+    }
+  }
+
+  const watchlistCellRenderers = {
+    name: (row: JsonRecord) => (
+      <EntityCell
+        title={String(row.name ?? '-')}
+        subtitle={String(row.ts_code ?? '')}
+        meta={String(row.industry || row.source_category || '')}
+        badges={[
+          row.is_overlay_selected ? { label: '精选', tone: 'good' as const } : null,
+          row.is_inference_overlay_selected ? { label: '最新', tone: 'brand' as const } : null,
+        ].filter(Boolean) as Array<{ label: string; tone?: 'default' | 'brand' | 'good' | 'warn' }>}
+      />
+    ),
+    actions: (row: JsonRecord) => (
+      <div className="flex items-center gap-2">
+        <button 
+          onClick={(e) => handleEdit(row, e)} 
+          disabled={writeLocked}
+          className="text-gray-400 hover:text-erp-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed p-1"
+          title="修改持仓/备忘"
+        >
+          <i className="ph ph-pencil-simple text-lg"></i>
+        </button>
+        <button 
+          onClick={(e) => handleDelete(row, e)} 
+          disabled={writeLocked || deleteMutation.isPending}
+          className="text-gray-400 hover:text-erp-danger transition-colors disabled:opacity-50 disabled:cursor-not-allowed p-1"
+          title="删除"
+        >
+          <i className="ph ph-trash text-lg"></i>
+        </button>
+      </div>
+    ),
+  }
 
   const openDetail = (symbol: string) => {
     if (!symbol) {
@@ -165,6 +221,18 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
 
         <button className="toolbar-btn ml-2 shrink-0" onClick={() => copyShareablePageLink(location.pathname, location.search)}>
           <i className="ph ph-link"></i> 复制视图
+        </button>
+
+        <button 
+          className="toolbar-btn shrink-0"
+          onClick={() => {
+            setEditingItem(null)
+            setAddDialogOpen(true)
+          }}
+          disabled={writeLocked}
+        >
+          <i className="ph ph-plus-circle text-erp-success"></i> 
+          添加标的
         </button>
 
         <button 
@@ -241,6 +309,16 @@ export function WatchlistPage({ bootstrap, authenticated = false }: WatchlistPag
           </button>
         </div>
       </div>
+      
+      <WatchlistEditDialog 
+        key={String(addDialogOpen) + String(editingItem?.ts_code ?? '')}
+        open={addDialogOpen} 
+        onClose={() => {
+          setAddDialogOpen(false)
+          setEditingItem(null)
+        }} 
+        initialItem={editingItem}
+      />
     </div>
   )
 }
