@@ -98,26 +98,26 @@ export function CandidateDetailPage() {
         <QueryNotice isLoading={detailQuery.isLoading || historyQuery.isLoading} error={detailQuery.error ?? historyQuery.error} />
         
         {/* Core Detail Grid - Large Flat Row */}
-        <div className="flex items-center gap-12 shrink-0 border-b erp-border pb-6">
+        <div className="flex items-center gap-12 shrink-0 border erp-border bg-erp-surface rounded-xl p-6 shadow-sm mb-4">
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">综合分数 / Score</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">综合分数 / Score</span>
             <span className="text-3xl font-mono font-bold leading-none text-erp-primary">{String(detail.score ?? '-')}</span>
-            <span className="text-[10px] text-gray-400 mt-1 uppercase font-bold">
+            <span className="text-[10px] text-erp-muted mt-1 uppercase font-bold">
               {formatDate(detail.trade_date)}
             </span>
           </div>
-          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="w-px h-10 bg-erp-border"></div>
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">模型排名 / Rank</span>
-            <span className="text-3xl font-mono font-bold leading-none text-gray-700">#{String(detail.rank ?? '-')}</span>
-            <span className="text-[10px] text-gray-400 mt-1 uppercase font-bold">
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">模型排名 / Rank</span>
+            <span className="text-3xl font-mono font-bold leading-none text-erp-text">#{String(detail.rank ?? '-')}</span>
+            <span className="text-[10px] text-erp-muted mt-1 uppercase font-bold">
               分位: {formatPercent(detail.rank_pct)}
             </span>
           </div>
-          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="w-px h-10 bg-erp-border"></div>
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">预测 10D 收益</span>
-            <span className={`text-3xl font-mono font-bold leading-none ${Number(detail.ret_t1_t10) > 0 ? 'text-erp-danger' : Number(detail.ret_t1_t10) < 0 ? 'text-erp-success' : ''}`}>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">预测 10D 收益</span>
+            <span className={`text-3xl font-mono font-bold leading-none ${Number(detail.ret_t1_t10) > 0 ? 'text-erp-danger' : Number(detail.ret_t1_t10) < 0 ? 'text-erp-success' : 'text-erp-text'}`}>
               {formatPercent(detail.ret_t1_t10)}
             </span>
           </div>

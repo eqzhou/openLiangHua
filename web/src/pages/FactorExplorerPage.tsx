@@ -180,28 +180,28 @@ export function FactorExplorerPage() {
         <QueryNotice isLoading={summaryQuery.isLoading} error={summaryQuery.error ?? detailQuery.error} />
 
         {/* Top Feature Summary Bar */}
-        <div className="flex items-center gap-16 shrink-0 border-b erp-border pb-8">
+        <div className="flex items-center gap-16 shrink-0 border erp-border bg-erp-surface rounded-xl p-6 shadow-sm mb-4">
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">当前聚焦标的</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">当前聚焦标的</span>
             <span className="text-3xl font-bold text-erp-primary leading-none">{String(selectedRecord.name ?? summaryQuery.data?.selectedSymbol ?? '未选择')}</span>
-            <span className="text-xs font-mono text-gray-400 mt-2 uppercase">{String(summaryQuery.data?.selectedSymbol ?? '-')}</span>
+            <span className="text-xs font-mono text-erp-muted mt-2 uppercase">{String(summaryQuery.data?.selectedSymbol ?? '-')}</span>
           </div>
-          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="w-px h-10 bg-erp-border"></div>
           <div className="grid grid-cols-4 gap-8">
              <div className="flex flex-col">
-               <span className="text-gray-400 text-[10px] uppercase font-bold">距20日线</span>
-               <span className="text-xl font-mono font-bold">{formatValue(selectedRecord.close_to_ma_20)}</span>
+               <span className="text-erp-muted text-[10px] uppercase font-bold">距20日线</span>
+               <span className="text-xl font-mono font-bold text-erp-text">{formatValue(selectedRecord.close_to_ma_20)}</span>
              </div>
              <div className="flex flex-col">
-               <span className="text-gray-400 text-[10px] uppercase font-bold">距60日线</span>
-               <span className="text-xl font-mono font-bold">{formatValue(selectedRecord.close_to_ma_60)}</span>
+               <span className="text-erp-muted text-[10px] uppercase font-bold">距60日线</span>
+               <span className="text-xl font-mono font-bold text-erp-text">{formatValue(selectedRecord.close_to_ma_60)}</span>
              </div>
              <div className="flex flex-col">
-               <span className="text-gray-400 text-[10px] uppercase font-bold">20日动量</span>
-               <span className="text-xl font-mono font-bold">{formatValue(selectedRecord.mom_20)}</span>
+               <span className="text-erp-muted text-[10px] uppercase font-bold">20日动量</span>
+               <span className="text-xl font-mono font-bold text-erp-text">{formatValue(selectedRecord.mom_20)}</span>
              </div>
              <div className="flex flex-col">
-               <span className="text-gray-400 text-[10px] uppercase font-bold">20日波动</span>
+               <span className="text-erp-muted text-[10px] uppercase font-bold">20日波动</span>
                <span className="text-xl font-mono font-bold text-erp-warning">{formatValue(selectedRecord.vol_20)}</span>
              </div>
           </div>

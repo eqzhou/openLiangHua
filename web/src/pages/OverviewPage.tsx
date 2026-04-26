@@ -184,26 +184,26 @@ export function OverviewPage({ bootstrap }: OverviewPageProps) {
         <QueryNotice isLoading={overviewQuery.isLoading || curvesQuery.isLoading} error={overviewQuery.error ?? curvesQuery.error} />
 
         {/* Top Summary Row - Large Numbers */}
-        <div className="flex items-center gap-16 shrink-0 border-b erp-border pb-8">
+        <div className="flex items-center gap-16 shrink-0 border erp-border bg-erp-surface rounded-xl p-6 shadow-sm mb-4">
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">特征样本总数</span>
-            <span className="text-4xl font-mono font-bold leading-none">{formatValue(summary.feature_rows ?? 0)}</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">特征样本总数</span>
+            <span className="text-4xl font-mono font-bold leading-none text-erp-text">{formatValue(summary.feature_rows ?? 0)}</span>
           </div>
-          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="w-px h-10 bg-erp-border"></div>
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">股票覆盖数</span>
-            <span className="text-4xl font-mono font-bold leading-none">{formatValue(summary.feature_symbols ?? 0)}</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">股票覆盖数</span>
+            <span className="text-4xl font-mono font-bold leading-none text-erp-text">{formatValue(summary.feature_symbols ?? 0)}</span>
           </div>
-          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="w-px h-10 bg-erp-border"></div>
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">最佳年化收益</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">最佳年化收益</span>
             <span className="text-4xl font-mono font-bold leading-none text-erp-danger">{formatPercent(bestAnnualized?.daily_portfolio_annualized_return)}</span>
-            <span className="text-[10px] text-gray-400 mt-2 uppercase font-bold">{String(bestAnnualized?.model ?? '-')}</span>
+            <span className="text-[10px] text-erp-muted mt-2 uppercase font-bold">{String(bestAnnualized?.model ?? '-')}</span>
           </div>
-          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="w-px h-10 bg-erp-border"></div>
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">平均换手率</span>
-            <span className="text-4xl font-mono font-bold leading-none text-gray-700">{formatPercent(summary.avg_turnover_ratio)}</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">平均换手率</span>
+            <span className="text-4xl font-mono font-bold leading-none text-erp-text">{formatPercent(summary.avg_turnover_ratio)}</span>
           </div>
         </div>
 

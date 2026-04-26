@@ -189,33 +189,33 @@ export function HomePage({
         />
 
         {/* Top Operational Metrics */}
-        <div className="flex items-center gap-16 shrink-0 border-b erp-border pb-10">
+        <div className="flex items-center gap-16 shrink-0 border erp-border bg-erp-surface rounded-xl p-6 shadow-sm mb-4">
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">观察池标的总数</span>
-            <span className="text-4xl font-mono font-bold leading-none text-gray-700">{String(watchlist?.overview?.totalCount ?? 0)}</span>
-            <span className="text-[10px] text-gray-400 mt-2 uppercase font-bold">精选占比: {formatPercent(Number(watchlist?.overview?.overlayCount ?? 0) / (Number(watchlist?.overview?.totalCount) || 1))}</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">观察池标的总数</span>
+            <span className="text-4xl font-mono font-bold leading-none text-erp-text">{String(watchlist?.overview?.totalCount ?? 0)}</span>
+            <span className="text-[10px] text-erp-muted mt-2 uppercase font-bold">精选占比: {formatPercent(Number(watchlist?.overview?.overlayCount ?? 0) / (Number(watchlist?.overview?.totalCount) || 1))}</span>
           </div>
-          <div className="w-px h-12 bg-gray-200"></div>
+          <div className="w-px h-12 bg-erp-border"></div>
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">今日风险提醒</span>
-            <span className={`text-4xl font-mono font-bold leading-none ${alerts.length ? 'text-erp-danger' : 'text-gray-300'}`}>{alerts.length}</span>
-            <span className="text-[10px] text-gray-400 mt-2 uppercase font-bold">高优先级: {alerts.filter(a => a.tone === 'warn').length}</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">今日风险提醒</span>
+            <span className={`text-4xl font-mono font-bold leading-none ${alerts.length ? 'text-erp-danger' : 'text-erp-muted opacity-50'}`}>{alerts.length}</span>
+            <span className="text-[10px] text-erp-muted mt-2 uppercase font-bold">高优先级: {alerts.filter(a => a.tone === 'warn').length}</span>
           </div>
-          <div className="w-px h-12 bg-gray-200"></div>
+          <div className="w-px h-12 bg-erp-border"></div>
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">当前最强模型 (年化)</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">当前最强模型 (年化)</span>
             <span className="text-4xl font-mono font-bold leading-none text-erp-danger">{formatPercent(overview?.bestAnnualized?.daily_portfolio_annualized_return)}</span>
-            <span className="text-[10px] text-gray-400 mt-2 uppercase font-bold tracking-widest">{String(overview?.bestAnnualized?.model ?? '-').toUpperCase()}</span>
+            <span className="text-[10px] text-erp-muted mt-2 uppercase font-bold tracking-widest">{String(overview?.bestAnnualized?.model ?? '-').toUpperCase()}</span>
           </div>
           
           <div className="flex-1 max-w-xl border-l erp-border pl-10 ml-4">
-             <div className={`p-4 rounded-lg border-2 border-dashed transition-colors ${serviceRunning ? 'bg-green-50/30 border-green-200' : 'bg-red-50/30 border-red-200'}`}>
+             <div className={`p-4 rounded-lg border-2 border-dashed transition-colors ${serviceRunning ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
                 <div className="text-xs font-bold uppercase mb-2 flex items-center gap-2">
-                   <div className={`w-2 h-2 rounded-full ${serviceRunning ? 'bg-erp-success animate-pulse' : 'bg-erp-danger'}`}></div>
+                   <div className={`w-2 h-2 rounded-full ${serviceRunning ? 'bg-erp-success animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-erp-danger'}`}></div>
                    系统运行环境快照
                 </div>
-                <div className="text-gray-600 text-sm leading-relaxed">
-                   当前行情源: <span className="font-bold text-gray-800">{realtimeSource.label}</span> | 
+                <div className="text-erp-muted text-sm leading-relaxed">
+                   当前行情源: <span className="font-bold text-erp-text">{realtimeSource.label}</span> | 
                    快照时间: <span className="font-mono">{String(realtimeSnapshot.snapshot_label_display || '未同步')}</span>
                    <br/>
                    最近操作结果: <span className={`font-bold ${latestAction?.ok ? 'text-erp-success' : 'text-erp-danger'}`}>{latestAction ? (latestAction.ok ? 'SUCCESS' : 'FAILED') : 'NONE'}</span>

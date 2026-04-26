@@ -247,30 +247,30 @@ export function ModelBacktestPage({ bootstrap }: ModelBacktestPageProps) {
         <QueryNotice isLoading={backtestSummaryQuery.isLoading || backtestPortfolioQuery.isLoading || backtestDiagnosticsQuery.isLoading} error={backtestSummaryQuery.error ?? backtestPortfolioQuery.error ?? backtestDiagnosticsQuery.error} />
 
         {/* Top Analysis Conclusion - Major Metric Row */}
-        <div className="flex items-center gap-12 shrink-0 border-b erp-border pb-8">
+        <div className="flex items-center gap-12 shrink-0 border erp-border bg-erp-surface rounded-xl p-6 shadow-sm mb-4">
            <div className="flex flex-col gap-1 w-[280px]">
-              <div className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">回测诊断结论 / Stability Grade</div>
+              <div className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">回测诊断结论 / Stability Grade</div>
               <div className={`text-3xl font-bold leading-none ${stabilityTone === 'good' ? 'text-erp-success' : 'text-erp-warning'}`}>
                 {String(stability.conclusion ?? '评估中...')}
               </div>
            </div>
-           <div className="w-px h-12 bg-gray-200"></div>
-           <div className="grid grid-cols-4 gap-12">
+           <div className="w-px h-12 bg-erp-border"></div>
+           <div className="grid grid-cols-4 gap-12 flex-1">
               <div className="flex flex-col">
-                 <span className="text-gray-400 text-[10px] uppercase font-bold">年化收益</span>
+                 <span className="text-erp-muted text-[10px] uppercase font-bold">年化收益</span>
                  <span className={`text-2xl font-mono font-bold leading-none ${Number(metrics.daily_portfolio_annualized_return) > 0 ? 'text-erp-danger' : 'text-erp-success'}`}>{formatPercent(metrics.daily_portfolio_annualized_return)}</span>
               </div>
               <div className="flex flex-col">
-                 <span className="text-gray-400 text-[10px] uppercase font-bold">最大回撤</span>
+                 <span className="text-erp-muted text-[10px] uppercase font-bold">最大回撤</span>
                  <span className="text-2xl font-mono font-bold leading-none text-erp-success">{formatPercent(metrics.daily_portfolio_max_drawdown)}</span>
               </div>
               <div className="flex flex-col">
-                 <span className="text-gray-400 text-[10px] uppercase font-bold">组合夏普</span>
-                 <span className="text-2xl font-mono font-bold leading-none">{String(metrics.daily_portfolio_sharpe ?? '-')}</span>
+                 <span className="text-erp-muted text-[10px] uppercase font-bold">组合夏普</span>
+                 <span className="text-2xl font-mono font-bold leading-none text-erp-text">{String(metrics.daily_portfolio_sharpe ?? '-')}</span>
               </div>
               <div className="flex flex-col">
-                 <span className="text-gray-400 text-[10px] uppercase font-bold">TopN 命中率</span>
-                 <span className="text-2xl font-mono font-bold leading-none">{formatPercent(metrics.top_n_hit_rate)}</span>
+                 <span className="text-erp-muted text-[10px] uppercase font-bold">TopN 命中率</span>
+                 <span className="text-2xl font-mono font-bold leading-none text-erp-text">{formatPercent(metrics.top_n_hit_rate)}</span>
               </div>
            </div>
         </div>

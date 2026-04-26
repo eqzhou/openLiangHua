@@ -88,29 +88,29 @@ export function AiReviewDetailPage() {
         <QueryNotice isLoading={detailQuery.isLoading || summaryQuery.isLoading} error={detailQuery.error ?? summaryQuery.error} />
         
         {/* Header Summary Bar - Flat */}
-        <div className="flex items-center gap-12 shrink-0 border-b erp-border pb-6">
+        <div className="flex items-center gap-12 shrink-0 border erp-border bg-erp-surface rounded-xl p-6 shadow-sm mb-4">
           <div className="flex flex-col">
-            <div className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">综合得分 / Final Score</div>
+            <div className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">综合得分 / Final Score</div>
             <div className="text-3xl font-mono font-bold text-erp-primary leading-none">{String(selected.final_score ?? '-')}</div>
           </div>
-          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="w-px h-10 bg-erp-border"></div>
           <div className="grid grid-cols-3 gap-8">
              <div className="flex flex-col">
-               <span className="text-gray-400 text-[10px] uppercase font-bold">量化得分</span>
-               <span className="text-lg font-mono font-bold">{String(selected.quant_score ?? '-')}</span>
+               <span className="text-erp-muted text-[10px] uppercase font-bold">量化得分</span>
+               <span className="text-lg font-mono font-bold text-erp-text">{String(selected.quant_score ?? '-')}</span>
              </div>
              <div className="flex flex-col">
-               <span className="text-gray-400 text-[10px] uppercase font-bold">叠加得分</span>
-               <span className="text-lg font-mono font-bold">{String(selected.factor_overlay_score ?? '-')}</span>
+               <span className="text-erp-muted text-[10px] uppercase font-bold">叠加得分</span>
+               <span className="text-lg font-mono font-bold text-erp-text">{String(selected.factor_overlay_score ?? '-')}</span>
              </div>
              <div className="flex flex-col">
-               <span className="text-gray-400 text-[10px] uppercase font-bold">模型共识</span>
-               <span className="text-lg font-mono font-bold">{String(selected.model_consensus ?? '-')}</span>
+               <span className="text-erp-muted text-[10px] uppercase font-bold">模型共识</span>
+               <span className="text-lg font-mono font-bold text-erp-text">{String(selected.model_consensus ?? '-')}</span>
              </div>
           </div>
           <div className="flex-1 max-w-2xl border-l erp-border pl-8 ml-4">
-            <div className="text-gray-400 text-[10px] uppercase font-bold mb-1">核心论点 (Thesis Summary)</div>
-            <div className="text-gray-600 text-sm leading-relaxed italic">
+            <div className="text-erp-muted text-[10px] uppercase font-bold mb-1">核心论点 (Thesis Summary)</div>
+            <div className="text-erp-text text-sm leading-relaxed italic">
               "{String(selected.thesis_summary ?? selected.action_hint ?? '暂无结论摘要')}"
             </div>
           </div>

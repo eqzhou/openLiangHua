@@ -161,30 +161,30 @@ export function WatchlistDetailPage({ authenticated = false }: WatchlistDetailPa
         <QueryNotice isLoading={summaryQuery.isLoading || detailQuery.isLoading} error={summaryQuery.error ?? detailQuery.error} />
         
         {/* Core Detail Grid - Large Flat Row */}
-        <div className="flex items-center gap-12 shrink-0 border-b erp-border pb-6">
+        <div className="flex items-center gap-12 shrink-0 border erp-border bg-erp-surface rounded-xl p-6 shadow-sm mb-4">
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">参考价 / Mark Price</span>
-            <span className="text-3xl font-mono font-bold leading-none text-gray-700">{String(detail.mark_price ?? '-')}</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">参考价 / Mark Price</span>
+            <span className="text-3xl font-mono font-bold leading-none text-erp-text">{String(detail.mark_price ?? '-')}</span>
           </div>
-          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="w-px h-10 bg-erp-border"></div>
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">最新价 / Last Price</span>
-            <span className="text-3xl font-mono font-bold leading-none">{String(detail.realtime_price ?? '-')}</span>
-            <span className="text-[10px] text-gray-400 mt-1 uppercase">
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">最新价 / Last Price</span>
+            <span className="text-3xl font-mono font-bold leading-none text-erp-text">{String(detail.realtime_price ?? '-')}</span>
+            <span className="text-[10px] text-erp-muted mt-1 uppercase">
               {describeRealtimeSource(detail.realtime_quote_source ?? realtimeStatus.source).label}
             </span>
           </div>
-          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="w-px h-10 bg-erp-border"></div>
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">盘中涨跌</span>
-            <span className={`text-3xl font-mono font-bold leading-none ${Number(detail.realtime_pct_chg) > 0 ? 'text-erp-danger' : Number(detail.realtime_pct_chg) < 0 ? 'text-erp-success' : ''}`}>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">盘中涨跌</span>
+            <span className={`text-3xl font-mono font-bold leading-none ${Number(detail.realtime_pct_chg) > 0 ? 'text-erp-danger' : Number(detail.realtime_pct_chg) < 0 ? 'text-erp-success' : 'text-erp-text'}`}>
               {formatPercent(detail.realtime_pct_chg)}
             </span>
           </div>
-          <div className="w-px h-10 bg-gray-200"></div>
+          <div className="w-px h-10 bg-erp-border"></div>
           <div className="flex flex-col">
-            <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-1">解套价</span>
-            <span className="text-3xl font-mono font-bold leading-none text-gray-400">{String(detail.breakeven_price ?? '-')}</span>
+            <span className="text-erp-muted text-[10px] uppercase font-bold tracking-widest mb-1">解套价</span>
+            <span className="text-3xl font-mono font-bold leading-none text-erp-muted">{String(detail.breakeven_price ?? '-')}</span>
           </div>
           
           <div className="flex-1 max-w-xl border-l erp-border pl-8 ml-4">

@@ -79,7 +79,7 @@ export function AppLayout({
   }
 
   return (
-    <div className={`h-screen w-screen flex flex-col overflow-hidden select-none bg-erp-bg text-erp-text font-erp transition-colors duration-200`}>
+    <div className={`h-screen w-full flex flex-col overflow-hidden select-none bg-erp-bg text-erp-text font-erp transition-colors duration-200`}>
       {/* Unified Top Navigation Bar */}
       <div className="h-10 bg-erp-header flex items-center px-3 text-erp-sm text-erp-header-text gap-4 shrink-0 z-50 shadow-md">
         {/* Left: Sidebar Toggle & Brand */}
@@ -97,30 +97,8 @@ export function AppLayout({
           </div>
         </div>
 
-        {/* Menus */}
-        <div className="hidden lg:flex items-center gap-1 border-l border-white/10 pl-4 h-full">
-          <div className="cursor-pointer hover:bg-white/10 px-3 py-1 rounded transition-colors">文件(F)</div>
-          <div className="cursor-pointer hover:bg-white/10 px-3 py-1 rounded transition-colors text-erp-primary-hover font-bold">策略(S)</div>
-          <div className="cursor-pointer hover:bg-white/10 px-3 py-1 rounded transition-colors">视图(V)</div>
-          <div className="cursor-pointer hover:bg-white/10 px-3 py-1 rounded transition-colors">工具(T)</div>
-        </div>
-
-        {/* Center: Search & Global Actions */}
-        <div className="flex-1 flex justify-center max-w-2xl px-4">
-          <div className="flex items-center gap-3 w-full bg-white/5 border border-white/10 px-3 py-1 rounded-md shadow-inner focus-within:bg-white/10 focus-within:border-erp-primary/50 transition-all">
-            <i className="ph ph-magnifying-glass text-white/30 text-base"></i>
-            <input 
-              type="text" 
-              placeholder="全域搜索指令、代码或研报..." 
-              className="outline-none text-[13px] w-full bg-transparent text-erp-header-text placeholder:text-white/20" 
-            />
-            <div className="flex items-center gap-1 border-l border-white/10 pl-3">
-               <button className="hover:text-erp-primary-hover transition-colors p-1" title="刷新系统状态" onClick={() => window.location.reload()}>
-                 <i className="ph ph-arrows-clockwise text-base"></i>
-               </button>
-            </div>
-          </div>
-        </div>
+        {/* Center Spacer */}
+        <div className="flex-1"></div>
 
         {/* Right: Theme, Env, User */}
         <div className="ml-auto flex items-center gap-4 h-full">
