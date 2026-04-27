@@ -340,7 +340,6 @@ input:focus, select:focus {
   height: 100%;
   overflow: auto;
   background: var(--color-erp-surface);
-  border: 1px solid var(--color-erp-border);
 }
 
 .data-table {
@@ -352,25 +351,26 @@ input:focus, select:focus {
 }
 
 .data-table th, .data-table td {
-  padding: 4px 10px !important;
-  border-right: 1px solid var(--color-erp-border);
+  padding: 6px 12px !important;
   border-bottom: 1px solid var(--color-erp-border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  height: 40px !important;
+  height: 44px !important;
 }
 
 .data-table th {
-  background: var(--color-erp-row-hover);
-  font-weight: 600;
-  color: var(--color-erp-text);
+  background: var(--color-erp-surface);
+  font-weight: 700;
+  color: var(--color-erp-muted);
   position: sticky;
   top: 0;
   z-index: 10;
   box-shadow: 0 1px 0 var(--color-erp-border);
   text-align: left;
-  font-size: 13px; /* 表头稍小一点保持严谨 */
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .data-table tbody tr:nth-child(even),
