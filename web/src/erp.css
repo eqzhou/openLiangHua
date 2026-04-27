@@ -409,7 +409,7 @@ input:focus, select:focus {
 }
 
 .table-wrap--sticky-first .data-table th:first-child {
-  background: var(--color-erp-row-hover);
+  background: var(--color-erp-surface);
   z-index: 30;
 }
 
