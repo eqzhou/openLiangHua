@@ -351,12 +351,17 @@ input:focus, select:focus {
 }
 
 .data-table th, .data-table td {
-  padding: 6px 12px !important;
+  padding: 0 12px !important;
   border-bottom: 1px solid var(--color-erp-border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   height: 44px !important;
+  vertical-align: middle !important;
+}
+
+.data-table__th-inner {
+  height: 100%;
 }
 
 .data-table th {
