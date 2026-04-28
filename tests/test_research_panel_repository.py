@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
@@ -115,6 +116,33 @@ class ResearchPanelRepositoryTests(unittest.TestCase):
         self.assertNotIn("ret_t1_t10", feature_frame.columns)
         self.assertIn("ret_t1_t10", label_frame.columns)
         self.assertNotIn("mom_5", label_frame.columns)
+
+    def test_delete_research_panel_source_removes_rows_by_data_source(self) -> None:
+        from src.app.repositories.research_panel_repository import delete_research_panel_source
+
+        fake_cursor = Mock()
+        fake_cursor.rowcount = 42
+        fake_cursor.__enter__ = Mock(return_value=fake_cursor)
+        fake_cursor.__exit__ = Mock(return_value=None)
+
+        fake_connection = Mock()
+        fake_connection.cursor.return_value = fake_cursor
+        fake_connection.__enter__ = Mock(return_value=fake_connection)
+        fake_connection.__exit__ = Mock(return_value=None)
+
+        with (
+            patch("src.app.repositories.research_panel_repository.ensure_research_panel_schema") as ensure_schema,
+            patch("src.app.repositories.research_panel_repository.connect_database", return_value=fake_connection),
+        ):
+            deleted_rows = delete_research_panel_source(data_source="tushare")
+
+        ensure_schema.assert_called_once()
+        fake_cursor.execute.assert_called_once()
+        sql, params = fake_cursor.execute.call_args.args
+        self.assertIn("delete from research.panel", sql.lower())
+        self.assertEqual(params, ("tushare",))
+        fake_connection.commit.assert_called_once()
+        self.assertEqual(deleted_rows, 42)
 
 
 if __name__ == "__main__":

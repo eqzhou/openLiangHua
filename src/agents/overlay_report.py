@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,7 @@ from src.agents.ensemble_weights import resolve_model_weights
 from src.agents.llm_bridge import export_llm_requests
 from src.agents.news_context import build_event_context
 from src.app.repositories.config_repository import load_experiment_config
+from src.app.repositories.postgres_watchlist_store import PostgresWatchlistStore
 from src.app.repositories.report_repository import (
     load_daily_bar as repo_load_daily_bar,
     load_metrics as repo_load_metrics,
@@ -19,6 +21,7 @@ from src.app.repositories.report_repository import (
 from src.utils.data_source import active_data_source, source_or_canonical_path
 from src.utils.io import ensure_dir, project_root
 from src.utils.logger import configure_logging
+from src.web_api.settings import get_api_settings
 
 logger = configure_logging()
 
@@ -132,6 +135,27 @@ def _prefer_database(root: Path) -> bool:
         return root.resolve() == project_root().resolve()
     except OSError:
         return False
+
+
+def resolve_overlay_user_id(user_id: str | None = None) -> str:
+    normalized = str(user_id or os.getenv("OPENLIANGHUA_USER_ID") or "").strip()
+    return normalized or "bootstrap-admin"
+
+
+def load_overlay_symbol_universe(user_id: str | None = None) -> list[str]:
+    resolved_user_id = resolve_overlay_user_id(user_id)
+    try:
+        watchlist = PostgresWatchlistStore(get_api_settings()).load_watchlist(resolved_user_id)
+    except Exception as exc:
+        logger.warning("Failed to load AI overlay universe from watchlist_items for user {}: {}", resolved_user_id, exc)
+        return []
+
+    symbols: list[str] = []
+    for item in [*(watchlist.get("holdings", []) or []), *(watchlist.get("focus_pool", []) or [])]:
+        symbol = str(item.get("ts_code", "") or "").strip()
+        if symbol and symbol not in symbols:
+            symbols.append(symbol)
+    return symbols
 
 
 def _overlay_config(experiment: dict) -> dict:
@@ -521,6 +545,8 @@ def build_overlay_report_from_frames(
     latest_risk_state: dict | None = None,
     model_metrics: dict | None = None,
     prediction_mode: str = "historical_split",
+    candidate_symbols: list[str] | None = None,
+    candidate_universe_source: str = "model_predictions",
 ) -> tuple[pd.DataFrame, dict, str]:
     reports_dir = ensure_dir(root / "reports" / "weekly")
     if lgbm.empty or ridge.empty:
@@ -564,6 +590,14 @@ def build_overlay_report_from_frames(
     merged = lgbm_latest.merge(ridge_latest, on="ts_code", how="inner")
     if merged.empty:
         raise RuntimeError("Latest overlay snapshot is empty after merging Ridge and LightGBM predictions.")
+    normalized_candidate_symbols = [str(symbol or "").strip() for symbol in (candidate_symbols or []) if str(symbol or "").strip()]
+    if normalized_candidate_symbols:
+        symbol_set = set(normalized_candidate_symbols)
+        merged = merged.loc[merged["ts_code"].astype(str).isin(symbol_set)].copy()
+        if merged.empty:
+            raise RuntimeError(
+                f"AI overlay universe from {candidate_universe_source} has no matching Ridge/LGBM predictions."
+            )
 
     industry_name_map = _load_industry_name_map(root, data_source)
 
@@ -599,7 +633,7 @@ def build_overlay_report_from_frames(
         axis=1,
     )
 
-    candidate_pool_size = int(overlay["candidate_pool_size"])
+    candidate_pool_size = len(merged) if normalized_candidate_symbols else int(overlay["candidate_pool_size"])
     top_n = int(overlay["top_n"])
     preliminary_ranked = (
         merged.sort_values(["final_score", "model_consensus", "quant_score"], ascending=False)
@@ -718,6 +752,8 @@ def build_overlay_report_from_frames(
         "latest_date": str(latest_date.date()),
         "candidate_pool_size": candidate_pool_size,
         "top_n": top_n,
+        "candidate_universe_source": candidate_universe_source,
+        "candidate_universe_count": len(normalized_candidate_symbols) if normalized_candidate_symbols else int(len(merged)),
         "model_metrics": resolved_model_metrics,
         "ensemble_weights": ensemble_weights,
         "event_coverage": event_coverage,
@@ -747,6 +783,7 @@ def build_overlay_report() -> tuple[pd.DataFrame, dict, str]:
         ridge=ridge,
         latest_risk_state=latest_risk_state,
         prediction_mode="historical_split",
+        candidate_universe_source="model_predictions",
     )
 
 

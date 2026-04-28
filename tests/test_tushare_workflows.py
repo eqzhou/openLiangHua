@@ -45,6 +45,7 @@ class TushareWorkflowTests(unittest.TestCase):
 
         incremental.assert_called_once()
         feature_builder.assert_called_once()
+        self.assertTrue(feature_builder.call_args.kwargs["prefer_source_daily_bar"])
         dashboard_sync.assert_called_once()
         self.assertTrue(summary["ok"])
         self.assertEqual(summary["target_source"], "akshare")

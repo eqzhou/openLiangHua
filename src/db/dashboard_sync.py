@@ -42,6 +42,7 @@ from src.db.dashboard_artifact_keys import (
     overlay_llm_responses_artifact_key,
     table_artifact_key,
     text_artifact_key,
+    user_watchlist_artifact_key,
     watchlist_artifact_key,
 )
 from src.db.dashboard_artifact_store import get_dashboard_artifact_store
@@ -109,6 +110,7 @@ def _build_watchlist_snapshot(
     root: Path,
     data_source: str,
     watchlist_config: dict[str, Any],
+    user_id: str | None = None,
 ) -> pd.DataFrame:
     return build_watchlist_view(
         root=root,
@@ -119,8 +121,8 @@ def _build_watchlist_snapshot(
         lgbm_predictions=load_predictions(root, data_source=data_source, model_name="lgbm", split_name="test", prefer_database=True),
         ensemble_predictions=load_predictions(root, data_source=data_source, model_name="ensemble", split_name="test", prefer_database=True),
         overlay_candidates=load_overlay_candidates(root, data_source=data_source, prefer_database=True),
-        ensemble_inference_predictions=load_predictions(root, data_source=data_source, model_name="ensemble", split_name="inference", prefer_database=True),
-        overlay_inference_candidates=load_overlay_inference_candidates(root, data_source=data_source, prefer_database=True),
+        ensemble_inference_predictions=load_predictions(root, data_source=data_source, model_name="ensemble", split_name="inference", prefer_database=True, user_id=user_id),
+        overlay_inference_candidates=load_overlay_inference_candidates(root, data_source=data_source, prefer_database=True, user_id=user_id),
     )
 
 
@@ -130,10 +132,20 @@ def sync_watchlist_snapshot_artifact(
     data_source: str | None = None,
     watchlist_config: dict[str, Any] | None = None,
     snapshot_frame: pd.DataFrame | None = None,
+    user_id: str | None = None,
 ) -> SyncSummary:
     resolved_root = root or project_root()
     resolved_data_source = data_source or active_data_source()
-    resolved_watchlist_config = watchlist_config or load_watchlist_config(resolved_root, prefer_database=False)
+    resolved_watchlist_config = watchlist_config or load_watchlist_config(
+        resolved_root,
+        prefer_database=bool(user_id),
+        user_id=user_id,
+    )
+    artifact_key = (
+        user_watchlist_artifact_key(resolved_data_source, user_id)
+        if user_id
+        else watchlist_artifact_key(resolved_data_source)
+    )
     store = get_dashboard_artifact_store()
 
     try:
@@ -143,13 +155,14 @@ def sync_watchlist_snapshot_artifact(
                 root=resolved_root,
                 data_source=resolved_data_source,
                 watchlist_config=resolved_watchlist_config,
+                user_id=user_id,
             )
         store.upsert_json(
-            artifact_key=watchlist_artifact_key(resolved_data_source),
+            artifact_key=artifact_key,
             data_source=resolved_data_source,
             artifact_kind="table",
             payload=_frame_payload(watchlist_snapshot),
-            metadata={"rows": int(len(watchlist_snapshot))},
+            metadata={"rows": int(len(watchlist_snapshot)), "user_id": user_id},
         )
     except Exception as exc:
         return SyncSummary(ok=False, synced_items=0, message=str(exc))

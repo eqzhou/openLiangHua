@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.app.repositories.report_repository import save_binary_dataset
+from src.app.repositories.report_repository import load_daily_bar, load_stock_basic, load_trade_calendar, save_binary_dataset
 from src.data.tushare_client import TushareClient
 from src.data.universe import load_universe
 from src.utils.data_source import active_data_source, normalize_data_source, source_or_canonical_path
@@ -89,6 +89,15 @@ def _read_local_frame(path: Path) -> pd.DataFrame:
     return frame
 
 
+def _uses_primary_project_root(root: Path | None) -> bool:
+    if root is None:
+        return True
+    try:
+        return root.resolve() == project_root().resolve()
+    except OSError:
+        return False
+
+
 def _normalize_trade_calendar(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame(columns=["trade_date"])
@@ -153,9 +162,20 @@ def _load_existing_inputs(root: Path, target_source: str) -> tuple[pd.DataFrame,
     stock_basic_path = source_or_canonical_path(staging_dir, "stock_basic.parquet", target_source)
     trade_calendar_path = source_or_canonical_path(staging_dir, "trade_calendar.parquet", target_source)
 
-    daily_bar = _read_local_frame(daily_bar_path)
-    stock_basic = _read_local_frame(stock_basic_path)
-    trade_calendar = _read_local_frame(trade_calendar_path)
+    if _uses_primary_project_root(root):
+        daily_bar = load_daily_bar(root, data_source=target_source, prefer_database=True)
+        stock_basic = load_stock_basic(root, data_source=target_source, prefer_database=True)
+        trade_calendar = load_trade_calendar(root, data_source=target_source, prefer_database=True)
+        if daily_bar.empty:
+            daily_bar = _read_local_frame(daily_bar_path)
+        if stock_basic.empty:
+            stock_basic = _read_local_frame(stock_basic_path)
+        if trade_calendar.empty:
+            trade_calendar = _read_local_frame(trade_calendar_path)
+    else:
+        daily_bar = _read_local_frame(daily_bar_path)
+        stock_basic = _read_local_frame(stock_basic_path)
+        trade_calendar = _read_local_frame(trade_calendar_path)
     return daily_bar, stock_basic, trade_calendar, daily_bar_path, stock_basic_path, trade_calendar_path
 
 

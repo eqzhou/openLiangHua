@@ -12,6 +12,8 @@ from src.app.repositories import config_repository, holding_repository, report_r
 from src.db.dashboard_artifact_keys import (
     overlay_llm_response_summary_artifact_key,
     overlay_llm_responses_artifact_key,
+    user_note_artifact_key,
+    user_watchlist_artifact_key,
 )
 from src.db.dashboard_artifact_store import DashboardArtifact
 
@@ -23,6 +25,32 @@ def _parquet_bytes(frame: pd.DataFrame) -> bytes:
 
 
 class DatabaseRepositoryTests(unittest.TestCase):
+    def test_build_watchlist_snapshot_uses_global_historical_and_user_inference_artifacts(self) -> None:
+        from src.db import dashboard_sync
+
+        with (
+            patch("src.db.dashboard_sync.load_daily_bar", return_value=pd.DataFrame()),
+            patch("src.db.dashboard_sync.load_predictions", return_value=pd.DataFrame()) as prediction_loader,
+            patch("src.db.dashboard_sync.load_overlay_candidates", return_value=pd.DataFrame()) as historical_overlay_loader,
+            patch("src.db.dashboard_sync.load_overlay_inference_candidates", return_value=pd.DataFrame()) as inference_overlay_loader,
+            patch("src.db.dashboard_sync.build_watchlist_view", return_value=pd.DataFrame()),
+        ):
+            dashboard_sync._build_watchlist_snapshot(
+                root=Path("/repo"),
+                data_source="tushare",
+                watchlist_config={"holdings": [], "focus_pool": [{"ts_code": "000001.SZ"}]},
+                user_id="user-1",
+            )
+
+        self.assertNotIn("user_id", historical_overlay_loader.call_args.kwargs)
+        self.assertEqual(inference_overlay_loader.call_args.kwargs["user_id"], "user-1")
+        inference_prediction_calls = [
+            call
+            for call in prediction_loader.call_args_list
+            if call.kwargs.get("model_name") == "ensemble" and call.kwargs.get("split_name") == "inference"
+        ]
+        self.assertEqual(inference_prediction_calls[0].kwargs["user_id"], "user-1")
+
     def test_load_experiment_config_prefers_database_payload(self) -> None:
         original = config_repository._load_config_from_database
         try:
@@ -151,6 +179,102 @@ class DatabaseRepositoryTests(unittest.TestCase):
 
         self.assertEqual(loaded["ts_code"], "000001.SZ")
         self.assertEqual(fake_store.get_json_records_by_field.call_args.kwargs["field_value"], "000001.SZ")
+
+    def test_load_watchlist_record_uses_user_scoped_artifact_key(self) -> None:
+        fake_store = Mock()
+        fake_store.get_json_records_by_field.return_value = [
+            {"ts_code": "000001.SZ", "name": "用户持仓", "mark_price": 10.5},
+        ]
+
+        with patch("src.app.repositories.report_repository.get_dashboard_artifact_store", return_value=fake_store):
+            loaded = report_repository.load_watchlist_record(
+                data_source="akshare",
+                symbol="000001.SZ",
+                user_id="user-1",
+            )
+
+        self.assertEqual(loaded["name"], "用户持仓")
+        self.assertEqual(
+            fake_store.get_json_records_by_field.call_args.kwargs["artifact_key"],
+            user_watchlist_artifact_key("akshare", "user-1"),
+        )
+
+    def test_save_model_split_reports_uses_user_scoped_prediction_artifacts(self) -> None:
+        from src.db.dashboard_artifact_keys import user_table_artifact_key
+
+        fake_store = Mock()
+        predictions = pd.DataFrame(
+            [{"trade_date": "2026-04-28", "ts_code": "000001.SZ", "score": 0.8}]
+        )
+
+        with (
+            patch("src.app.repositories.report_repository._uses_primary_project_root", return_value=True),
+            patch("src.app.repositories.report_repository.get_dashboard_artifact_store", return_value=fake_store),
+        ):
+            report_repository.save_model_split_reports(
+                data_source="akshare",
+                model_name="ensemble",
+                split_name="inference",
+                predictions=predictions,
+                portfolio=pd.DataFrame(),
+                metrics={},
+                user_id="user-1",
+            )
+
+        self.assertEqual(
+            fake_store.upsert_bytes.call_args.kwargs["artifact_key"],
+            user_table_artifact_key("akshare", "predictions:ensemble:inference", "user-1"),
+        )
+        self.assertEqual(fake_store.upsert_bytes.call_args.kwargs["metadata"]["user_id"], "user-1")
+
+    def test_load_latest_symbol_markdown_uses_user_scoped_note_artifact(self) -> None:
+        artifact = DashboardArtifact(
+            artifact_key=user_note_artifact_key("akshare", "000001.SZ", "watch_plan", "user-1"),
+            data_source="akshare",
+            artifact_kind="note",
+            payload_json=None,
+            payload_text="user note",
+            payload_bytes=None,
+            metadata_json={"plan_date": "2026-04-28", "name": "user-note.md"},
+        )
+        original = report_repository._artifact_or_none
+        requested_keys: list[str] = []
+        try:
+            def fake_artifact_lookup(key: str):
+                requested_keys.append(key)
+                return artifact if key == artifact.artifact_key else None
+
+            report_repository._artifact_or_none = fake_artifact_lookup
+            loaded = report_repository.load_latest_symbol_markdown(
+                "000001.SZ",
+                "watch_plan",
+                data_source="akshare",
+                user_id="user-1",
+            )
+        finally:
+            report_repository._artifact_or_none = original
+
+        self.assertEqual(loaded["content"], "user note")
+        self.assertEqual(requested_keys, [user_note_artifact_key("akshare", "000001.SZ", "watch_plan", "user-1")])
+
+    def test_save_symbol_note_uses_user_scoped_note_artifact(self) -> None:
+        fake_store = Mock()
+
+        with patch("src.app.repositories.report_repository.get_dashboard_artifact_store", return_value=fake_store):
+            report_repository.save_symbol_note(
+                data_source="akshare",
+                symbol="000001.SZ",
+                note_kind="action_memo",
+                plan_date="2026-04-28",
+                content="user memo",
+                user_id="user-1",
+            )
+
+        self.assertEqual(
+            fake_store.upsert_text.call_args.kwargs["artifact_key"],
+            user_note_artifact_key("akshare", "000001.SZ", "action_memo", "user-1"),
+        )
+        self.assertEqual(fake_store.upsert_text.call_args.kwargs["metadata"]["user_id"], "user-1")
 
     def test_load_overlay_llm_bundle_prefers_database_text_artifacts(self) -> None:
         response_artifact = DashboardArtifact(

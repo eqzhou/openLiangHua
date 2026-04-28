@@ -33,6 +33,54 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
   })
 
   const payload = dataQuery.data
+  const marketBarsRefreshMutation = useMutation({
+    mutationFn: () =>
+      apiPost<ActionResult>(dataManagementClient.marketBarsActionPath(), {
+        target_source: payload?.targetSource ?? 'tushare',
+        end_date: endDate || undefined,
+      }),
+    onSuccess: (actionPayload) => {
+      setLatestAction(actionPayload)
+      void queryClient.invalidateQueries()
+      pushToast({
+        tone: actionPayload.ok ? 'success' : 'error',
+        title: actionPayload.label ?? '市场日线主表更新',
+        description: actionPayload.output,
+      })
+    },
+    onError: (error) => {
+      pushToast({
+        tone: 'error',
+        title: '市场日线主表更新失败',
+        description: toErrorMessage(error),
+      })
+    },
+  })
+
+  const watchlistResearchRefreshMutation = useMutation({
+    mutationFn: () =>
+      apiPost<ActionResult>(dataManagementClient.watchlistResearchActionPath(), {
+        target_source: payload?.targetSource ?? 'tushare',
+        end_date: endDate || undefined,
+      }),
+    onSuccess: (actionPayload) => {
+      setLatestAction(actionPayload)
+      void queryClient.invalidateQueries()
+      pushToast({
+        tone: actionPayload.ok ? 'success' : 'error',
+        title: actionPayload.label ?? '研究面板与 AI 候选刷新',
+        description: actionPayload.output,
+      })
+    },
+    onError: (error) => {
+      pushToast({
+        tone: 'error',
+        title: '研究面板与 AI 候选刷新失败',
+        description: toErrorMessage(error),
+      })
+    },
+  })
+
   const incrementalRefreshMutation = useMutation({
     mutationFn: () =>
       apiPost<ActionResult>(dataManagementClient.incrementalActionPath(), {
@@ -92,7 +140,13 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
   const actualSource = payload?.activeDataSource ?? targetSource
   const configuredSource = payload?.configuredDataSource ?? actualSource
   const sourceMismatch = payload?.sourceMismatch ?? false
-  const pendingAction = incrementalRefreshMutation.isPending ? 'incremental' : fullRefreshMutation.isPending ? 'full' : null
+  const pendingAction = marketBarsRefreshMutation.isPending
+    ? 'market'
+    : watchlistResearchRefreshMutation.isPending
+      ? 'research'
+      : incrementalRefreshMutation.isPending
+        ? 'incremental'
+        : fullRefreshMutation.isPending ? 'full' : null
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden text-erp bg-erp-bg">
@@ -195,6 +249,22 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
                          type="button"
                          className={`w-full h-9 flex items-center justify-center gap-2 rounded font-bold text-white transition-all shadow-sm ${!authenticated || tokenConfigured !== true || pendingAction !== null ? 'bg-gray-300 cursor-not-allowed' : 'bg-erp-primary hover:bg-erp-primary-hover active:scale-[0.98]'}`}
                          disabled={!authenticated || tokenConfigured !== true || pendingAction !== null}
+                         onClick={() => marketBarsRefreshMutation.mutate()}
+                       >
+                         {pendingAction === 'market' ? <><i className="ph ph-spinner animate-spin"></i> 更新主表中...</> : <><i className="ph ph-database"></i> 更新市场日线主表 (market.bars_1d)</>}
+                       </button>
+                       <button
+                         type="button"
+                         className={`w-full h-9 flex items-center justify-center gap-2 rounded font-bold transition-all shadow-sm ${!authenticated || pendingAction !== null ? 'bg-gray-100 text-gray-400 cursor-not-allowed erp-border' : 'bg-white erp-border hover:bg-gray-50 active:scale-[0.98] text-gray-700'}`}
+                         disabled={!authenticated || pendingAction !== null}
+                         onClick={() => watchlistResearchRefreshMutation.mutate()}
+                       >
+                         {pendingAction === 'research' ? <><i className="ph ph-spinner animate-spin"></i> 重建研究中...</> : <><i className="ph ph-chart-line-up"></i> 重建研究面板 + 最新推理 + AI候选</>}
+                       </button>
+                       <button
+                         type="button"
+                         className={`w-full h-9 flex items-center justify-center gap-2 rounded font-bold transition-all shadow-sm ${!authenticated || tokenConfigured !== true || pendingAction !== null ? 'bg-gray-100 text-gray-400 cursor-not-allowed erp-border' : 'bg-white erp-border hover:bg-gray-50 active:scale-[0.98] text-gray-700'}`}
+                         disabled={!authenticated || tokenConfigured !== true || pendingAction !== null}
                          onClick={() => incrementalRefreshMutation.mutate()}
                        >
                          {pendingAction === 'incremental' ? <><i className="ph ph-spinner animate-spin"></i> 增量刷新中...</> : <><i className="ph ph-fast-forward-circle"></i> Tushare 增量同步日线 (Incremental)</>}
@@ -270,11 +340,11 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
                     <div className="flex flex-col gap-1">
                        <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">增量刷新脚本:</span>
                        <code className="text-[11px] bg-white erp-border p-2 rounded text-erp-primary break-all select-all">
-                         powershell -ExecutionPolicy Bypass -File .\scripts\refresh_daily_bar_tushare.ps1 -TargetSource {targetSource}{endDate ? ` -EndDate ${endDate}` : ''}
+                         ./scripts/sync_market_bars_tushare.sh --user-id 当前登录用户{endDate ? ` --end-date ${endDate}` : ''}
                        </code>
                     </div>
                     <div className="flex flex-col gap-1">
-                       <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">全流程重建脚本:</span>
+                       <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">兼容 artifact 全流程脚本:</span>
                        <code className="text-[11px] bg-white erp-border p-2 rounded text-erp-primary break-all select-all">
                          powershell -ExecutionPolicy Bypass -File .\scripts\refresh_full_pipeline_tushare.ps1 -TargetSource {targetSource}{endDate ? ` -EndDate ${endDate}` : ''}
                        </code>

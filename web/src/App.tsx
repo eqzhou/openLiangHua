@@ -8,7 +8,7 @@ import { ToastProvider, useToast } from './components/ToastProvider'
 import { shellClient } from './facades/dashboardPageClient'
 import { AUTH_SESSION_REFETCH_INTERVAL_MS, SHELL_REFETCH_INTERVAL_MS } from './lib/polling'
 import { copyShareablePageLink } from './lib/shareLinks'
-import { clearUiPreferences, resolveInitialTheme } from './lib/uiPreferences'
+import { clearUiPreferences, resolveInitialTheme, setUiPreferenceScope } from './lib/uiPreferences'
 import { AppLayout } from './layout/AppLayout'
 import type { ActionResult, AuthSessionPayload, ShellPayload } from './types/api'
 
@@ -208,6 +208,8 @@ function DashboardApp() {
     .find(Boolean)
 
   const isAuthenticated = Boolean(authSessionQuery.data?.authenticated)
+  const activeUserId = authSessionQuery.data?.user?.userId ?? 'public'
+  setUiPreferenceScope(activeUserId)
 
   return (
     <AppLayout

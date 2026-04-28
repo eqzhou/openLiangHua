@@ -98,13 +98,13 @@ def _score_snapshot(
     return scored
 
 
-def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
+def generate_latest_inference(root: Path | None = None, *, user_id: str | None = None) -> dict[str, object]:
     resolved_root = root or project_root()
     workspace = resolve_model_workspace(resolved_root)
     data_source = workspace.data_source
     reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
 
-    panel = build_model_panel(workspace)
+    panel = build_model_panel(workspace, user_id=user_id)
     experiment = workspace.experiment
     market_panel = panel.copy()
     label_col = str(experiment["label_col"])
@@ -182,6 +182,7 @@ def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
         portfolio=pd.DataFrame(),
         metrics={},
         diagnostics={},
+        user_id=user_id,
     )
     lgbm_paths = save_model_split_reports(
         resolved_root,
@@ -192,6 +193,7 @@ def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
         portfolio=pd.DataFrame(),
         metrics={},
         diagnostics={},
+        user_id=user_id,
     )
     ensemble_paths = save_model_split_reports(
         resolved_root,
@@ -202,6 +204,7 @@ def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
         portfolio=pd.DataFrame(),
         metrics={},
         diagnostics={},
+        user_id=user_id,
     )
 
     feature_quality_export = feature_quality.copy()
@@ -225,6 +228,7 @@ def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
 
     packet = {
         "data_source": data_source,
+        "user_id": user_id,
         "prediction_mode": "latest_unlabeled_inference",
         "label_col": label_col,
         "latest_feature_date": str(latest_feature_date.date()),
@@ -251,7 +255,7 @@ def generate_latest_inference(root: Path | None = None) -> dict[str, object]:
         },
     }
 
-    packet_artifact_ref = save_inference_packet(resolved_root, data_source=data_source, payload=packet)
+    packet_artifact_ref = save_inference_packet(resolved_root, data_source=data_source, payload=packet, user_id=user_id)
     logger.info(f"Saved latest inference packet to {packet_artifact_ref}")
     return packet
 

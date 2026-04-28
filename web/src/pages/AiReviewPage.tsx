@@ -13,6 +13,7 @@ import type { AiReviewSummaryPayload, JsonRecord } from '../types/api'
 
 const CANDIDATE_COLUMNS = [
   'name',
+  'watchlist_relation_label',
   'trade_date',
   'industry_display',
   'action_hint',
@@ -25,6 +26,7 @@ const CANDIDATE_COLUMNS = [
 
 const CANDIDATE_COLUMN_LABELS = {
   name: '股票',
+  watchlist_relation_label: '持仓状态',
   trade_date: '截面日期',
   industry_display: '行业',
   action_hint: '操作建议',
@@ -36,8 +38,8 @@ const CANDIDATE_COLUMN_LABELS = {
 }
 
 const AI_VIEW_PRESETS = [
-  { key: 'thesis', label: '论点', columns: ['name', 'trade_date', 'action_hint', 'confidence_level', 'final_score', 'model_consensus'] },
-  { key: 'scores', label: '分数', columns: ['name', 'trade_date', 'final_score', 'quant_score', 'factor_overlay_score', 'confidence_level'] },
+  { key: 'thesis', label: '论点', columns: ['name', 'watchlist_relation_label', 'trade_date', 'action_hint', 'confidence_level', 'final_score', 'model_consensus'] },
+  { key: 'scores', label: '分数', columns: ['name', 'watchlist_relation_label', 'trade_date', 'final_score', 'quant_score', 'factor_overlay_score', 'confidence_level'] },
 ]
 
 function buildOptionLabel(row: JsonRecord): string {
@@ -57,18 +59,43 @@ function getConfidenceTone(value: unknown): 'default' | 'good' | 'warn' {
   return 'default'
 }
 
+function getWatchlistRelationTone(value: unknown): 'default' | 'good' | 'warn' | 'brand' {
+  const text = String(value ?? '')
+  if (text === '持仓') {
+    return 'brand'
+  }
+  if (text === '重点关注') {
+    return 'good'
+  }
+  return 'default'
+}
+
 const AI_CANDIDATE_CELL_RENDERERS = {
   name: (row: JsonRecord) => (
     <EntityCell
       title={String(row.name ?? '-')}
       subtitle={String(row.ts_code ?? '')}
       meta={String(row.industry_display ?? row.industry ?? '')}
-      badges={
+      badges={[
+        String(row.watchlist_relation_label ?? '').trim()
+          ? { label: String(row.watchlist_relation_label), tone: getWatchlistRelationTone(row.watchlist_relation_label) }
+          : null,
         String(row.confidence_level ?? '').trim()
-          ? [{ label: String(row.confidence_level), tone: getConfidenceTone(row.confidence_level) }]
-          : []
-      }
+          ? { label: String(row.confidence_level), tone: getConfidenceTone(row.confidence_level) }
+          : null,
+      ].filter(Boolean) as Array<{ label: string; tone: 'default' | 'good' | 'warn' | 'brand' }>}
     />
+  ),
+  watchlist_relation_label: (row: JsonRecord) => (
+    <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${
+      String(row.watchlist_relation ?? '') === 'holding'
+        ? 'border-blue-200 bg-blue-50 text-blue-700'
+        : String(row.watchlist_relation ?? '') === 'focus'
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          : 'border-gray-200 bg-gray-50 text-gray-500'
+    }`}>
+      {String(row.watchlist_relation_label ?? '未跟踪')}
+    </span>
   ),
 }
 

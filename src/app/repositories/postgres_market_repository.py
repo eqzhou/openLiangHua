@@ -77,8 +77,9 @@ def _to_ts_code(code: str, market: str | None) -> str:
 
 
 def load_daily_bar_from_market_database(symbols: list[str]) -> pd.DataFrame:
-    normalized_symbols = sorted({_normalize_symbol_code(symbol) for symbol in symbols if str(symbol or "").strip()})
-    if not normalized_symbols:
+    requested_symbols = sorted({str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()})
+    normalized_symbols = sorted({_normalize_symbol_code(symbol) for symbol in requested_symbols})
+    if not requested_symbols and not normalized_symbols:
         return pd.DataFrame()
 
     rows = _load_query_rows(
@@ -95,11 +96,13 @@ def load_daily_bar_from_market_database(symbols: list[str]) -> pd.DataFrame:
             b.amount,
             null::text as market
         from market.bars_1d b
-        left join ref.instruments i on i.symbol = b.symbol
-        where b.symbol = any(%s)
+        inner join ref.instruments i on i.symbol = b.symbol
+        where i.asset_type = 'equity'
+          and b.adjust_type = 'qfq'
+          and (b.symbol = any(%s) or split_part(b.symbol, '.', 1) = any(%s))
         order by b.symbol, b.trade_date
         """,
-        (normalized_symbols,),
+        (requested_symbols, normalized_symbols),
     )
     if not rows:
         return pd.DataFrame()
@@ -142,8 +145,9 @@ def load_daily_bar_batch_from_market_database(
     *,
     benchmark_code: str | None = None,
 ) -> pd.DataFrame:
-    normalized_symbols = sorted({_normalize_symbol_code(symbol) if "." not in str(symbol) else str(symbol).strip().upper() for symbol in symbols if str(symbol or "").strip()})
-    if not normalized_symbols:
+    requested_symbols = sorted({str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()})
+    normalized_symbols = sorted({_normalize_symbol_code(symbol) for symbol in requested_symbols})
+    if not requested_symbols and not normalized_symbols:
         return pd.DataFrame()
 
     rows = _load_query_rows(
@@ -165,10 +169,10 @@ def load_daily_bar_batch_from_market_database(
         inner join ref.instruments i on i.symbol = b.symbol
         where i.asset_type = 'equity'
           and b.adjust_type = 'qfq'
-          and b.symbol = any(%s)
+          and (b.symbol = any(%s) or split_part(b.symbol, '.', 1) = any(%s))
         order by b.symbol, b.trade_date
         """,
-        (normalized_symbols,),
+        (requested_symbols, normalized_symbols),
     )
     if not rows:
         return pd.DataFrame()

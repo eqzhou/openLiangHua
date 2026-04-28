@@ -16,6 +16,35 @@ def _write_parquet(path: Path, frame: pd.DataFrame) -> None:
 
 
 class TushareIncrementalSyncTests(unittest.TestCase):
+    def test_load_existing_inputs_prefers_database_artifacts_for_primary_root(self) -> None:
+        from src.data.tushare_incremental_sync import _load_existing_inputs
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            staging_dir = ensure_dir(root / "data" / "staging")
+            _write_parquet(
+                staging_dir / "tushare_daily_bar.parquet",
+                pd.DataFrame([{"trade_date": pd.Timestamp("2026-04-17"), "ts_code": "000001.SZ"}]),
+            )
+
+            database_panel = pd.DataFrame([{"trade_date": pd.Timestamp("2026-04-27"), "ts_code": "000001.SZ"}])
+            database_stock_basic = pd.DataFrame(
+                [{"ts_code": "000001.SZ", "name": "平安银行", "industry": "银行", "list_date": pd.Timestamp("1991-04-03")}]
+            )
+            database_calendar = pd.DataFrame({"trade_date": pd.to_datetime(["2026-04-27", "2026-04-28"])})
+
+            with (
+                patch("src.data.tushare_incremental_sync._uses_primary_project_root", return_value=True),
+                patch("src.data.tushare_incremental_sync.load_daily_bar", return_value=database_panel),
+                patch("src.data.tushare_incremental_sync.load_stock_basic", return_value=database_stock_basic),
+                patch("src.data.tushare_incremental_sync.load_trade_calendar", return_value=database_calendar),
+            ):
+                daily_bar, stock_basic, trade_calendar, *_ = _load_existing_inputs(root, "tushare")
+
+        self.assertEqual(pd.to_datetime(daily_bar["trade_date"]).max().date().isoformat(), "2026-04-27")
+        self.assertEqual(stock_basic["ts_code"].tolist(), ["000001.SZ"])
+        self.assertEqual(pd.to_datetime(trade_calendar["trade_date"]).max().date().isoformat(), "2026-04-28")
+
     def test_sync_incremental_daily_bar_appends_only_missing_trade_dates(self) -> None:
         from src.data.tushare_incremental_sync import sync_incremental_daily_bar
 

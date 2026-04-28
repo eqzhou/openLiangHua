@@ -1,6 +1,7 @@
 from .base import *
 from .watchlist_facade import *
 from .home_facade import *
+from .home_facade import _build_home_alerts
 from .ai_review_facade import *
 from .candidates_facade import *
 from .backtest_facade import *

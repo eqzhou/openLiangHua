@@ -34,8 +34,8 @@ def clear_snapshot_caches() -> None:
     return None
 
 
-def load_watchlist_snapshot() -> pd.DataFrame | None:
-    return repo_load_watchlist_snapshot(ROOT, data_source=_current_data_source())
+def load_watchlist_snapshot(user_id: str | None = None) -> pd.DataFrame | None:
+    return repo_load_watchlist_snapshot(ROOT, data_source=_current_data_source(), user_id=user_id)
 
 
 def load_candidate_snapshot(model_name: str, split_name: str) -> pd.DataFrame | None:
@@ -46,13 +46,13 @@ def load_factor_explorer_snapshot() -> dict[str, object] | None:
     return repo_load_factor_explorer_snapshot(ROOT, data_source=_current_data_source())
 
 
-def build_watchlist_base_frame() -> pd.DataFrame:
+def build_watchlist_base_frame(user_id: str | None = None) -> pd.DataFrame:
     current_data_source = _current_data_source()
-    watchlist_snapshot = load_watchlist_snapshot()
+    watchlist_snapshot = load_watchlist_snapshot(user_id=user_id)
     if watchlist_snapshot is not None:
         return watchlist_snapshot.copy()
 
-    watchlist_config = load_watchlist_config(ROOT, prefer_database=True)
+    watchlist_config = load_watchlist_config(ROOT, prefer_database=True, user_id=user_id)
     frame = build_watchlist_view(
         root=ROOT,
         data_source=current_data_source,
@@ -62,14 +62,15 @@ def build_watchlist_base_frame() -> pd.DataFrame:
         lgbm_predictions=repo_load_predictions(ROOT, data_source=current_data_source, model_name="lgbm", split_name="test"),
         ensemble_predictions=repo_load_predictions(ROOT, data_source=current_data_source, model_name="ensemble", split_name="test"),
         overlay_candidates=repo_load_overlay_candidates(ROOT, data_source=current_data_source),
-        ensemble_inference_predictions=repo_load_predictions(ROOT, data_source=current_data_source, model_name="ensemble", split_name="inference"),
-        overlay_inference_candidates=repo_load_overlay_inference_candidates(ROOT, data_source=current_data_source),
+        ensemble_inference_predictions=repo_load_predictions(ROOT, data_source=current_data_source, model_name="ensemble", split_name="inference", user_id=user_id),
+        overlay_inference_candidates=repo_load_overlay_inference_candidates(ROOT, data_source=current_data_source, user_id=user_id),
     )
     sync_watchlist_snapshot_artifact(
         root=ROOT,
         data_source=current_data_source,
         watchlist_config=watchlist_config,
         snapshot_frame=frame,
+        user_id=user_id,
     )
     return frame
 

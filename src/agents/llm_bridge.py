@@ -344,6 +344,7 @@ def export_llm_requests(
     data_source: str,
     *,
     output_prefix: str = "overlay_llm",
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     settings = load_llm_settings()
     selected = packet.get("selected_candidates", []) or []
@@ -407,6 +408,7 @@ def export_llm_requests(
         request_summary_text=request_summary_text,
         response_jsonl_text=response_jsonl_text,
         response_summary_text=response_summary_text,
+        user_id=user_id,
     )
 
     success_count = sum(1 for record in response_records if record.get("status") == "success")

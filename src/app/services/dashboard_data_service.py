@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from functools import lru_cache
@@ -368,12 +369,16 @@ ACTION_SPECS = [
     },
 ]
 
-def run_module(module_name: str) -> tuple[bool, str]:
+def run_module(module_name: str, *, extra_env: dict[str, str] | None = None) -> tuple[bool, str]:
     python_executable = str(PROJECT_PYTHON if PROJECT_PYTHON.exists() else Path(sys.executable))
     command = [python_executable, "-m", module_name]
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
     result = subprocess.run(
         command,
         cwd=str(ROOT),
+        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -438,9 +443,9 @@ def save_experiment_config(config: dict) -> None:
     clear_dashboard_data_caches()
 
 
-@lru_cache(maxsize=1)
-def load_watchlist_config() -> dict:
-    return repo_load_watchlist_config(ROOT)
+@lru_cache(maxsize=128)
+def load_watchlist_config(user_id: str | None = None) -> dict:
+    return repo_load_watchlist_config(ROOT, user_id=user_id)
 
 
 def load_dataset_summary() -> dict[str, object]:
@@ -459,55 +464,88 @@ def load_daily_bar() -> pd.DataFrame:
     return repo_load_daily_bar(ROOT, data_source=_current_data_source())
 
 
-def load_overlay_candidates() -> pd.DataFrame:
-    return repo_load_overlay_candidates(ROOT, data_source=_current_data_source())
+def load_overlay_candidates(user_id: str | None = None) -> pd.DataFrame:
+    return repo_load_overlay_candidates(ROOT, data_source=_current_data_source(), user_id=user_id)
 
 
-def load_overlay_candidate_summary_records(scope: str, field_names: list[str]) -> list[dict[str, object]]:
-    return repo_load_overlay_candidate_summary_records(ROOT, data_source=_current_data_source(), scope=scope, field_names=field_names)
+def load_overlay_candidate_summary_records(
+    scope: str,
+    field_names: list[str],
+    user_id: str | None = None,
+) -> list[dict[str, object]]:
+    return repo_load_overlay_candidate_summary_records(
+        ROOT,
+        data_source=_current_data_source(),
+        scope=scope,
+        field_names=field_names,
+        user_id=user_id,
+    )
 
 
-def load_overlay_candidate_record(scope: str, symbol: str, field_names: list[str] | None = None) -> dict[str, object]:
-    return repo_load_overlay_candidate_record(ROOT, data_source=_current_data_source(), scope=scope, symbol=symbol, field_names=field_names)
+def load_overlay_candidate_record(
+    scope: str,
+    symbol: str,
+    field_names: list[str] | None = None,
+    user_id: str | None = None,
+) -> dict[str, object]:
+    return repo_load_overlay_candidate_record(
+        ROOT,
+        data_source=_current_data_source(),
+        scope=scope,
+        symbol=symbol,
+        field_names=field_names,
+        user_id=user_id,
+    )
 
 
-def load_overlay_packet() -> dict:
-    return repo_load_overlay_packet(ROOT, data_source=_current_data_source())
+def load_overlay_packet(user_id: str | None = None) -> dict:
+    return repo_load_overlay_packet(ROOT, data_source=_current_data_source(), user_id=user_id)
 
 
-def load_overlay_brief() -> str:
-    return repo_load_overlay_brief(ROOT, data_source=_current_data_source())
+def load_overlay_brief(user_id: str | None = None) -> str:
+    return repo_load_overlay_brief(ROOT, data_source=_current_data_source(), user_id=user_id)
 
 
-def load_overlay_inference_candidates() -> pd.DataFrame:
-    return repo_load_overlay_inference_candidates(ROOT, data_source=_current_data_source())
+def load_overlay_inference_candidates(user_id: str | None = None) -> pd.DataFrame:
+    return repo_load_overlay_inference_candidates(ROOT, data_source=_current_data_source(), user_id=user_id)
 
 
-def load_overlay_inference_shortlist() -> str:
-    return repo_load_overlay_inference_shortlist(ROOT, data_source=_current_data_source())
+def load_overlay_inference_shortlist(user_id: str | None = None) -> str:
+    return repo_load_overlay_inference_shortlist(ROOT, data_source=_current_data_source(), user_id=user_id)
 
 
-def load_overlay_inference_packet() -> dict:
-    return repo_load_overlay_inference_packet(ROOT, data_source=_current_data_source())
+def load_overlay_inference_packet(user_id: str | None = None) -> dict:
+    return repo_load_overlay_inference_packet(ROOT, data_source=_current_data_source(), user_id=user_id)
 
 
-def load_overlay_inference_brief() -> str:
-    return repo_load_overlay_inference_brief(ROOT, data_source=_current_data_source())
+def load_overlay_inference_brief(user_id: str | None = None) -> str:
+    return repo_load_overlay_inference_brief(ROOT, data_source=_current_data_source(), user_id=user_id)
 
 
-def load_overlay_llm_bundle(scope: str) -> dict[str, object]:
+def load_overlay_llm_bundle(scope: str, user_id: str | None = None) -> dict[str, object]:
     normalized_scope = "inference" if scope == "inference" else "historical"
-    packet = load_overlay_inference_packet() if normalized_scope == "inference" else load_overlay_packet()
+    packet = (
+        load_overlay_inference_packet(user_id=user_id)
+        if normalized_scope == "inference"
+        else load_overlay_packet(user_id=user_id)
+    )
     return repo_load_overlay_llm_bundle(
         ROOT,
         data_source=_current_data_source(),
         scope=normalized_scope,
         packet=packet,
+        user_id=user_id,
     )
 
 
-def load_predictions(model_name: str, split_name: str) -> pd.DataFrame:
-    return repo_load_predictions(ROOT, data_source=_current_data_source(), model_name=model_name, split_name=split_name)
+def load_predictions(model_name: str, split_name: str, user_id: str | None = None) -> pd.DataFrame:
+    return repo_load_predictions(
+        ROOT,
+        data_source=_current_data_source(),
+        model_name=model_name,
+        split_name=split_name,
+        user_id=user_id,
+    )
 
 
 def load_prediction_history_for_symbol(model_name: str, split_name: str, symbol: str) -> pd.DataFrame:
@@ -562,8 +600,19 @@ def load_stability(model_name: str) -> dict:
     return repo_load_stability(ROOT, data_source=_current_data_source(), model_name=model_name)
 
 
-def load_latest_symbol_markdown(symbol: str, note_kind: str) -> dict[str, str]:
-    return repo_load_latest_symbol_markdown(symbol, note_kind, root=ROOT, data_source=_current_data_source())
+def load_latest_symbol_markdown(
+    symbol: str,
+    note_kind: str,
+    *,
+    user_id: str | None = None,
+) -> dict[str, str]:
+    return repo_load_latest_symbol_markdown(
+        symbol,
+        note_kind,
+        root=ROOT,
+        data_source=_current_data_source(),
+        user_id=user_id,
+    )
 
 
 def load_watchlist_summary_records(
@@ -574,6 +623,7 @@ def load_watchlist_summary_records(
     sort_by: str = "inference_rank",
     page: int = 1,
     page_size: int = 30,
+    user_id: str | None = None,
 ) -> list[dict[str, object]]:
     return repo_load_watchlist_summary_records(
         ROOT,
@@ -584,19 +634,37 @@ def load_watchlist_summary_records(
         sort_by=sort_by,
         page=page,
         page_size=page_size,
+        user_id=user_id,
     )
 
 
-def load_watchlist_record(symbol: str, field_names: list[str] | None = None) -> dict[str, object]:
-    return repo_load_watchlist_record(ROOT, data_source=_current_data_source(), symbol=symbol, field_names=field_names)
+def load_watchlist_record(
+    symbol: str,
+    field_names: list[str] | None = None,
+    *,
+    user_id: str | None = None,
+) -> dict[str, object]:
+    return repo_load_watchlist_record(
+        ROOT,
+        data_source=_current_data_source(),
+        symbol=symbol,
+        field_names=field_names,
+        user_id=user_id,
+    )
 
 
-def load_watchlist_overview() -> dict[str, object]:
-    return repo_load_watchlist_overview(ROOT, data_source=_current_data_source())
+def load_watchlist_overview(user_id: str | None = None) -> dict[str, object]:
+    return repo_load_watchlist_overview(ROOT, data_source=_current_data_source(), user_id=user_id)
 
 
-def load_watchlist_filtered_count(*, keyword: str = "", scope: str = "all") -> int:
-    return repo_load_watchlist_filtered_count(ROOT, data_source=_current_data_source(), keyword=keyword, scope=scope)
+def load_watchlist_filtered_count(*, keyword: str = "", scope: str = "all", user_id: str | None = None) -> int:
+    return repo_load_watchlist_filtered_count(
+        ROOT,
+        data_source=_current_data_source(),
+        keyword=keyword,
+        scope=scope,
+        user_id=user_id,
+    )
 
 
 def build_metrics_table() -> pd.DataFrame:
@@ -611,9 +679,9 @@ def build_metrics_table() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_watchlist_base_frame() -> pd.DataFrame:
-    return snapshot_build_watchlist_base_frame()
+def build_watchlist_base_frame(user_id: str | None = None) -> pd.DataFrame:
+    return snapshot_build_watchlist_base_frame(user_id=user_id)
 
 
-def load_watchlist_snapshot() -> pd.DataFrame | None:
-    return snapshot_load_watchlist_snapshot()
+def load_watchlist_snapshot(user_id: str | None = None) -> pd.DataFrame | None:
+    return snapshot_load_watchlist_snapshot(user_id=user_id)

@@ -12,7 +12,7 @@ def rank_candidates(
     max_per_group: int | None = None,
 ) -> pd.DataFrame:
     ranked = frame.sort_values(["trade_date", score_col], ascending=[True, False]).copy()
-    if group_col and max_per_group:
+    if group_col and max_per_group and group_col in ranked.columns:
         ranked["_group_key"] = ranked[group_col].fillna("未知行业")
         ranked["_group_rank"] = ranked.groupby(["trade_date", "_group_key"]).cumcount() + 1
         ranked = ranked.loc[ranked["_group_rank"] <= int(max_per_group)].copy()
@@ -58,8 +58,10 @@ def top_n_daily_portfolio(
         .reset_index()
         .sort_values("trade_date")
     )
+    selected_counts = selected.groupby("trade_date")["ts_code"].count().rename("selected_count").reset_index()
+    portfolio = portfolio.merge(selected_counts, on="trade_date", how="left")
     portfolio["turnover_ratio"] = 1.0
-    portfolio["selected_count"] = int(top_n)
+    portfolio["selected_count"] = portfolio["selected_count"].fillna(0).astype(int)
     portfolio["overlap_count"] = 0
     portfolio["net_return"] = portfolio.apply(
         lambda row: net_return_after_cost(float(row["gross_return"]), cost_bps * float(row["turnover_ratio"])),

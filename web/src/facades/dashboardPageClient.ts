@@ -335,6 +335,8 @@ export const servicePageClient = {
 export const dataManagementClient = {
   queryKey: (): QueryKey => ['data-management'],
   path: (): string => '/api/data-management',
+  marketBarsActionPath: (): string => '/api/data-management/market-bars-refresh',
+  watchlistResearchActionPath: (): string => '/api/data-management/watchlist-research-refresh',
   incrementalActionPath: (): string => '/api/data-management/tushare-refresh',
   fullRefreshActionPath: (): string => '/api/data-management/full-refresh',
 }

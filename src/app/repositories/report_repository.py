@@ -29,6 +29,11 @@ from src.db.dashboard_artifact_keys import (
     overlay_llm_responses_artifact_key,
     table_artifact_key,
     text_artifact_key,
+    user_json_artifact_key,
+    user_note_artifact_key,
+    user_table_artifact_key,
+    user_text_artifact_key,
+    user_watchlist_artifact_key,
     watchlist_artifact_key,
 )
 from src.db.dashboard_artifact_store import DashboardArtifact, get_dashboard_artifact_store
@@ -147,6 +152,14 @@ def _binary_artifact_payload(artifact_key: str) -> tuple[bytes, dict[str, Any]] 
 
 def _artifact_ref(artifact_key: str) -> str:
     return f"artifact://{artifact_key}"
+
+
+def _watchlist_artifact_key(data_source: str, user_id: str | None = None) -> str:
+    return user_watchlist_artifact_key(data_source, user_id) if user_id else watchlist_artifact_key(data_source)
+
+
+def _note_artifact_key(data_source: str, symbol: str, note_kind: str, user_id: str | None = None) -> str:
+    return user_note_artifact_key(data_source, symbol, note_kind, user_id) if user_id else note_artifact_key(data_source, symbol, note_kind)
 
 
 def _parquet_bytes(frame: pd.DataFrame) -> bytes:
@@ -575,6 +588,18 @@ def load_trade_calendar(root: Path | None = None, *, data_source: str, prefer_da
     return _read_parquet_frame(path)
 
 
+def load_stock_basic(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> pd.DataFrame:
+    if prefer_database and _uses_primary_project_root(root):
+        artifact_payload = _binary_artifact_payload(binary_artifact_key(data_source, "stock_basic"))
+        if artifact_payload is not None:
+            return _read_parquet_bytes(artifact_payload[0])
+        return pd.DataFrame()
+
+    resolved_root = root or project_root()
+    path = source_or_canonical_path(resolved_root / "data" / "staging", "stock_basic.parquet", data_source)
+    return _read_parquet_frame(path)
+
+
 def load_daily_bar(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> pd.DataFrame:
     if prefer_database and _uses_primary_project_root(root):
         artifact_payload = _binary_artifact_payload(binary_artifact_key(data_source, "daily_bar"))
@@ -679,9 +704,11 @@ def load_predictions(
     model_name: str,
     split_name: str,
     prefer_database: bool = True,
+    user_id: str | None = None,
 ) -> pd.DataFrame:
     if prefer_database and _uses_primary_project_root(root):
-        artifact = _artifact_or_none(table_artifact_key(data_source, f"predictions:{model_name}:{split_name}"))
+        artifact_key = user_table_artifact_key(data_source, f"predictions:{model_name}:{split_name}", user_id)
+        artifact = _artifact_or_none(artifact_key)
         if artifact is not None:
             if artifact.payload_json is not None:
                 return _frame_from_records(artifact.payload_json)
@@ -793,9 +820,27 @@ def load_diagnostic_table(
     return _read_csv_frame(path)
 
 
-def load_overlay_candidates(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> pd.DataFrame:
+def _overlay_table_artifact_key(data_source: str, artifact_name: str, user_id: str | None = None) -> str:
+    return user_table_artifact_key(data_source, artifact_name, user_id) if user_id else table_artifact_key(data_source, artifact_name)
+
+
+def _overlay_json_artifact_key(data_source: str, artifact_name: str, user_id: str | None = None) -> str:
+    return user_json_artifact_key(data_source, artifact_name, user_id) if user_id else json_artifact_key(data_source, artifact_name)
+
+
+def _overlay_text_artifact_key(data_source: str, artifact_name: str, user_id: str | None = None) -> str:
+    return user_text_artifact_key(data_source, artifact_name, user_id) if user_id else text_artifact_key(data_source, artifact_name)
+
+
+def load_overlay_candidates(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    prefer_database: bool = True,
+    user_id: str | None = None,
+) -> pd.DataFrame:
     if prefer_database and _uses_primary_project_root(root):
-        artifact_payload = _json_artifact_payload(table_artifact_key(data_source, "overlay_candidates"))
+        artifact_payload = _json_artifact_payload(_overlay_table_artifact_key(data_source, "overlay_candidates", user_id))
         if artifact_payload is not None:
             return _frame_from_records(artifact_payload)
         return pd.DataFrame()
@@ -805,9 +850,15 @@ def load_overlay_candidates(root: Path | None = None, *, data_source: str, prefe
     return _read_csv_frame(path)
 
 
-def load_overlay_packet(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> dict[str, Any]:
+def load_overlay_packet(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    prefer_database: bool = True,
+    user_id: str | None = None,
+) -> dict[str, Any]:
     if prefer_database and _uses_primary_project_root(root):
-        artifact_payload = _json_artifact_payload(json_artifact_key(data_source, "overlay_packet"))
+        artifact_payload = _json_artifact_payload(_overlay_json_artifact_key(data_source, "overlay_packet", user_id))
         if isinstance(artifact_payload, dict):
             return artifact_payload
         return {}
@@ -817,9 +868,15 @@ def load_overlay_packet(root: Path | None = None, *, data_source: str, prefer_da
     return read_json(path)
 
 
-def load_overlay_brief(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> str:
+def load_overlay_brief(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    prefer_database: bool = True,
+    user_id: str | None = None,
+) -> str:
     if prefer_database and _uses_primary_project_root(root):
-        artifact_payload = _text_artifact_payload(text_artifact_key(data_source, "overlay_brief"))
+        artifact_payload = _text_artifact_payload(_overlay_text_artifact_key(data_source, "overlay_brief", user_id))
         if artifact_payload is not None:
             return artifact_payload[0]
         return ""
@@ -829,9 +886,17 @@ def load_overlay_brief(root: Path | None = None, *, data_source: str, prefer_dat
     return read_text(path)
 
 
-def load_overlay_inference_candidates(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> pd.DataFrame:
+def load_overlay_inference_candidates(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    prefer_database: bool = True,
+    user_id: str | None = None,
+) -> pd.DataFrame:
     if prefer_database and _uses_primary_project_root(root):
-        artifact_payload = _json_artifact_payload(table_artifact_key(data_source, "overlay_inference_candidates"))
+        artifact_payload = _json_artifact_payload(
+            _overlay_table_artifact_key(data_source, "overlay_inference_candidates", user_id)
+        )
         if artifact_payload is not None:
             return _frame_from_records(artifact_payload)
         return pd.DataFrame()
@@ -845,9 +910,17 @@ def load_overlay_inference_candidates(root: Path | None = None, *, data_source: 
     return _read_csv_frame(path)
 
 
-def load_overlay_inference_packet(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> dict[str, Any]:
+def load_overlay_inference_packet(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    prefer_database: bool = True,
+    user_id: str | None = None,
+) -> dict[str, Any]:
     if prefer_database and _uses_primary_project_root(root):
-        artifact_payload = _json_artifact_payload(json_artifact_key(data_source, "overlay_inference_packet"))
+        artifact_payload = _json_artifact_payload(
+            _overlay_json_artifact_key(data_source, "overlay_inference_packet", user_id)
+        )
         if isinstance(artifact_payload, dict):
             return artifact_payload
         return {}
@@ -861,9 +934,17 @@ def load_overlay_inference_packet(root: Path | None = None, *, data_source: str,
     return read_json(path)
 
 
-def load_overlay_inference_brief(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> str:
+def load_overlay_inference_brief(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    prefer_database: bool = True,
+    user_id: str | None = None,
+) -> str:
     if prefer_database and _uses_primary_project_root(root):
-        artifact_payload = _text_artifact_payload(text_artifact_key(data_source, "overlay_inference_brief"))
+        artifact_payload = _text_artifact_payload(
+            _overlay_text_artifact_key(data_source, "overlay_inference_brief", user_id)
+        )
         if artifact_payload is not None:
             return artifact_payload[0]
         return ""
@@ -877,9 +958,17 @@ def load_overlay_inference_brief(root: Path | None = None, *, data_source: str, 
     return read_text(path)
 
 
-def load_overlay_inference_shortlist(root: Path | None = None, *, data_source: str, prefer_database: bool = True) -> str:
+def load_overlay_inference_shortlist(
+    root: Path | None = None,
+    *,
+    data_source: str,
+    prefer_database: bool = True,
+    user_id: str | None = None,
+) -> str:
     if prefer_database and _uses_primary_project_root(root):
-        artifact_payload = _text_artifact_payload(text_artifact_key(data_source, "overlay_inference_shortlist"))
+        artifact_payload = _text_artifact_payload(
+            _overlay_text_artifact_key(data_source, "overlay_inference_shortlist", user_id)
+        )
         if artifact_payload is not None:
             return artifact_payload[0]
         return ""
@@ -924,20 +1013,32 @@ def load_overlay_llm_bundle(
     scope: str,
     packet: dict[str, Any] | None = None,
     prefer_database: bool = True,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_scope = "inference" if scope == "inference" else "historical"
+    artifact_prefix = "overlay_inference" if normalized_scope == "inference" else "overlay"
     response_records: list[dict[str, Any]] = []
     response_summary = ""
     records_loaded_from_store = False
     summary_loaded_from_store = False
 
     if prefer_database:
-        records_artifact = _text_artifact_payload(overlay_llm_responses_artifact_key(data_source, normalized_scope))
+        records_key = (
+            _overlay_text_artifact_key(data_source, f"{artifact_prefix}_llm_responses", user_id)
+            if user_id
+            else overlay_llm_responses_artifact_key(data_source, normalized_scope)
+        )
+        records_artifact = _text_artifact_payload(records_key)
         if records_artifact is not None:
             response_records = _parse_jsonl_text(records_artifact[0])
             records_loaded_from_store = True
 
-        summary_artifact = _text_artifact_payload(overlay_llm_response_summary_artifact_key(data_source, normalized_scope))
+        summary_key = (
+            _overlay_text_artifact_key(data_source, f"{artifact_prefix}_llm_response_summary", user_id)
+            if user_id
+            else overlay_llm_response_summary_artifact_key(data_source, normalized_scope)
+        )
+        summary_artifact = _text_artifact_payload(summary_key)
         if summary_artifact is not None:
             response_summary = summary_artifact[0]
             summary_loaded_from_store = True
@@ -975,9 +1076,10 @@ def load_watchlist_snapshot(
     *,
     data_source: str,
     prefer_database: bool = True,
+    user_id: str | None = None,
 ) -> pd.DataFrame | None:
     if prefer_database:
-        artifact_payload = _json_artifact_payload(watchlist_artifact_key(data_source))
+        artifact_payload = _json_artifact_payload(_watchlist_artifact_key(data_source, user_id))
         if artifact_payload is not None:
             return _frame_from_records(artifact_payload)
     return None
@@ -1008,10 +1110,11 @@ def load_watchlist_summary_records(
     page: int = 1,
     page_size: int = 30,
     prefer_database: bool = True,
+    user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     if prefer_database and _uses_primary_project_root(root):
         return _load_watchlist_summary_records_from_database(
-            artifact_key=watchlist_artifact_key(data_source),
+            artifact_key=_watchlist_artifact_key(data_source, user_id),
             field_names=field_names,
             keyword=keyword,
             scope=scope,
@@ -1020,7 +1123,7 @@ def load_watchlist_summary_records(
             page_size=page_size,
         )
 
-    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database)
+    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database, user_id=user_id)
     if snapshot is None or snapshot.empty:
         return []
     filtered = _filter_watchlist_snapshot_frame(snapshot, keyword=keyword, scope=scope, sort_by=sort_by)
@@ -1042,6 +1145,7 @@ def load_watchlist_record(
     symbol: str,
     field_names: list[str] | None = None,
     prefer_database: bool = True,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_symbol = str(symbol or "").strip()
     if not normalized_symbol:
@@ -1050,20 +1154,20 @@ def load_watchlist_record(
     if prefer_database and _uses_primary_project_root(root):
         if field_names:
             rows = _projected_table_artifact_records(
-                artifact_key=watchlist_artifact_key(data_source),
+                artifact_key=_watchlist_artifact_key(data_source, user_id),
                 field_names=field_names,
                 filter_symbol=normalized_symbol,
             )
             return rows[0] if rows else {}
 
         rows = get_dashboard_artifact_store().get_json_records_by_field(
-            artifact_key=watchlist_artifact_key(data_source),
+            artifact_key=_watchlist_artifact_key(data_source, user_id),
             field_name="ts_code",
             field_value=normalized_symbol,
         )
         return rows[0] if rows else {}
 
-    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database)
+    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database, user_id=user_id)
     if snapshot is None or snapshot.empty:
         return {}
     matched = snapshot.loc[snapshot["ts_code"].astype(str) == normalized_symbol].head(1)
@@ -1080,11 +1184,12 @@ def load_watchlist_overview(
     *,
     data_source: str,
     prefer_database: bool = True,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     if prefer_database and _uses_primary_project_root(root):
-        return _load_watchlist_overview_from_database(artifact_key=watchlist_artifact_key(data_source))
+        return _load_watchlist_overview_from_database(artifact_key=_watchlist_artifact_key(data_source, user_id))
 
-    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database)
+    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database, user_id=user_id)
     if snapshot is None or snapshot.empty:
         return {
             "totalCount": 0,
@@ -1109,15 +1214,16 @@ def load_watchlist_filtered_count(
     keyword: str = "",
     scope: str = "all",
     prefer_database: bool = True,
+    user_id: str | None = None,
 ) -> int:
     if prefer_database and _uses_primary_project_root(root):
         return _load_watchlist_filtered_count_from_database(
-            artifact_key=watchlist_artifact_key(data_source),
+            artifact_key=_watchlist_artifact_key(data_source, user_id),
             keyword=keyword,
             scope=scope,
         )
 
-    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database)
+    snapshot = load_watchlist_snapshot(root, data_source=data_source, prefer_database=prefer_database, user_id=user_id)
     if snapshot is None or snapshot.empty:
         return 0
     filtered = _filter_watchlist_snapshot_frame(snapshot, keyword=keyword, scope=scope, sort_by="inference_rank")
@@ -1152,10 +1258,10 @@ def load_factor_explorer_snapshot(
     return None
 
 
-def _overlay_candidate_artifact_key(data_source: str, scope: str) -> str:
+def _overlay_candidate_artifact_key(data_source: str, scope: str, user_id: str | None = None) -> str:
     normalized_scope = "inference" if scope == "inference" else "historical"
     artifact_name = "overlay_inference_candidates" if normalized_scope == "inference" else "overlay_candidates"
-    return table_artifact_key(data_source, artifact_name)
+    return _overlay_table_artifact_key(data_source, artifact_name, user_id)
 
 
 def load_overlay_candidate_summary_records(
@@ -1165,14 +1271,19 @@ def load_overlay_candidate_summary_records(
     scope: str,
     field_names: list[str],
     prefer_database: bool = True,
+    user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     if prefer_database and _uses_primary_project_root(root):
         return _projected_table_artifact_records(
-            artifact_key=_overlay_candidate_artifact_key(data_source, scope),
+            artifact_key=_overlay_candidate_artifact_key(data_source, scope, user_id),
             field_names=field_names,
         )
 
-    candidates = load_overlay_inference_candidates(root, data_source=data_source, prefer_database=prefer_database) if scope == "inference" else load_overlay_candidates(root, data_source=data_source, prefer_database=prefer_database)
+    candidates = (
+        load_overlay_inference_candidates(root, data_source=data_source, prefer_database=prefer_database, user_id=user_id)
+        if scope == "inference"
+        else load_overlay_candidates(root, data_source=data_source, prefer_database=prefer_database, user_id=user_id)
+    )
     if candidates.empty:
         return []
     available_columns = [column for column in field_names if column in candidates.columns]
@@ -1189,6 +1300,7 @@ def load_overlay_candidate_record(
     symbol: str,
     field_names: list[str] | None = None,
     prefer_database: bool = True,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_symbol = str(symbol or "").strip()
     if not normalized_symbol:
@@ -1197,20 +1309,24 @@ def load_overlay_candidate_record(
     if prefer_database and _uses_primary_project_root(root):
         if field_names:
             rows = _projected_table_artifact_records(
-                artifact_key=_overlay_candidate_artifact_key(data_source, scope),
+                artifact_key=_overlay_candidate_artifact_key(data_source, scope, user_id),
                 field_names=field_names,
                 filter_symbol=normalized_symbol,
             )
             return rows[0] if rows else {}
 
         rows = get_dashboard_artifact_store().get_json_records_by_field(
-            artifact_key=_overlay_candidate_artifact_key(data_source, scope),
+            artifact_key=_overlay_candidate_artifact_key(data_source, scope, user_id),
             field_name="ts_code",
             field_value=normalized_symbol,
         )
         return rows[0] if rows else {}
 
-    candidates = load_overlay_inference_candidates(root, data_source=data_source, prefer_database=prefer_database) if scope == "inference" else load_overlay_candidates(root, data_source=data_source, prefer_database=prefer_database)
+    candidates = (
+        load_overlay_inference_candidates(root, data_source=data_source, prefer_database=prefer_database, user_id=user_id)
+        if scope == "inference"
+        else load_overlay_candidates(root, data_source=data_source, prefer_database=prefer_database, user_id=user_id)
+    )
     if candidates.empty:
         return {}
     matched = candidates.loc[candidates["ts_code"].astype(str) == normalized_symbol].head(1)
@@ -1229,13 +1345,14 @@ def load_latest_symbol_markdown(
     root: Path | None = None,
     data_source: str,
     prefer_database: bool = True,
+    user_id: str | None = None,
 ) -> dict[str, str]:
     normalized_symbol = str(symbol or "").strip()
     if not normalized_symbol:
         return {}
 
     if prefer_database and _uses_primary_project_root(root):
-        artifact_payload = _text_artifact_payload(note_artifact_key(data_source, normalized_symbol, note_kind))
+        artifact_payload = _text_artifact_payload(_note_artifact_key(data_source, normalized_symbol, note_kind, user_id))
         if artifact_payload is not None:
             content, metadata = artifact_payload
             return {
@@ -1316,6 +1433,7 @@ def save_text_report(
     filename: str,
     content: str,
     artifact_name: str,
+    user_id: str | None = None,
 ) -> str:
     if not _uses_primary_project_root(root):
         resolved_root = root or project_root()
@@ -1324,21 +1442,21 @@ def save_text_report(
         save_text(content, source_path)
         save_text(content, reports_dir / filename)
         get_dashboard_artifact_store().upsert_text(
-            artifact_key=text_artifact_key(data_source, artifact_name),
+            artifact_key=_overlay_text_artifact_key(data_source, artifact_name, user_id),
             data_source=data_source,
             artifact_kind="markdown",
             content=content,
-            metadata={"source_path": str(source_path)},
+            metadata={"source_path": str(source_path), "user_id": user_id},
         )
         return source_path
 
-    artifact_key = text_artifact_key(data_source, artifact_name)
+    artifact_key = _overlay_text_artifact_key(data_source, artifact_name, user_id)
     get_dashboard_artifact_store().upsert_text(
         artifact_key=artifact_key,
         data_source=data_source,
         artifact_kind="markdown",
         content=content,
-        metadata={"filename": filename},
+        metadata={"filename": filename, "user_id": user_id},
     )
     return _artifact_ref(artifact_key)
 
@@ -1353,6 +1471,7 @@ def save_model_split_reports(
     portfolio: pd.DataFrame,
     metrics: dict[str, Any],
     diagnostics: dict[str, pd.DataFrame] | None = None,
+    user_id: str | None = None,
 ) -> dict[str, str]:
     if not _uses_primary_project_root(root):
         resolved_root = root or project_root()
@@ -1368,22 +1487,22 @@ def save_model_split_reports(
 
         store = get_dashboard_artifact_store()
         store.upsert_json(
-            artifact_key=table_artifact_key(data_source, f"predictions:{model_name}:{split_name}"),
+            artifact_key=user_table_artifact_key(data_source, f"predictions:{model_name}:{split_name}", user_id),
             data_source=data_source,
             artifact_kind="table",
             payload=_frame_records_for_artifact(predictions),
-            metadata={"rows": int(len(predictions)), "source_path": str(prediction_path)},
+            metadata={"rows": int(len(predictions)), "source_path": str(prediction_path), "user_id": user_id},
         )
         if not predictions.empty:
             from src.utils.prediction_snapshot import build_latest_prediction_snapshot
 
             candidate_snapshot = build_latest_prediction_snapshot(predictions)
             store.upsert_json(
-                artifact_key=candidate_snapshot_artifact_key(data_source, model_name, split_name),
+                artifact_key=user_table_artifact_key(data_source, f"candidate_snapshot:{model_name}:{split_name}", user_id),
                 data_source=data_source,
                 artifact_kind="table",
                 payload=_frame_records_for_artifact(candidate_snapshot),
-                metadata={"rows": int(len(candidate_snapshot)), "source_path": str(prediction_path)},
+                metadata={"rows": int(len(candidate_snapshot)), "source_path": str(prediction_path), "user_id": user_id},
             )
         store.upsert_json(
             artifact_key=table_artifact_key(data_source, f"portfolio:{model_name}:{split_name}"),
@@ -1421,26 +1540,26 @@ def save_model_split_reports(
         return output
 
     store = get_dashboard_artifact_store()
-    prediction_key = table_artifact_key(data_source, f"predictions:{model_name}:{split_name}")
-    portfolio_key = table_artifact_key(data_source, f"portfolio:{model_name}:{split_name}")
-    metrics_key = json_artifact_key(data_source, f"metrics:{model_name}:{split_name}")
+    prediction_key = user_table_artifact_key(data_source, f"predictions:{model_name}:{split_name}", user_id)
+    portfolio_key = user_table_artifact_key(data_source, f"portfolio:{model_name}:{split_name}", user_id)
+    metrics_key = user_json_artifact_key(data_source, f"metrics:{model_name}:{split_name}", user_id)
     store.upsert_bytes(
         artifact_key=prediction_key,
         data_source=data_source,
         artifact_kind="parquet",
         content=_parquet_bytes(predictions),
-        metadata={"rows": int(len(predictions)), "model_name": model_name, "split_name": split_name},
+        metadata={"rows": int(len(predictions)), "model_name": model_name, "split_name": split_name, "user_id": user_id},
     )
     if not predictions.empty:
         from src.utils.prediction_snapshot import build_latest_prediction_snapshot
 
         candidate_snapshot = build_latest_prediction_snapshot(predictions)
         store.upsert_json(
-            artifact_key=candidate_snapshot_artifact_key(data_source, model_name, split_name),
+            artifact_key=user_table_artifact_key(data_source, f"candidate_snapshot:{model_name}:{split_name}", user_id),
             data_source=data_source,
             artifact_kind="table",
             payload=_frame_records_for_artifact(candidate_snapshot),
-            metadata={"rows": int(len(candidate_snapshot)), "model_name": model_name, "split_name": split_name},
+            metadata={"rows": int(len(candidate_snapshot)), "model_name": model_name, "split_name": split_name, "user_id": user_id},
         )
     store.upsert_json(
         artifact_key=portfolio_key,
@@ -1577,6 +1696,7 @@ def save_inference_packet(
     *,
     data_source: str,
     payload: dict[str, Any],
+    user_id: str | None = None,
 ) -> str:
     if not _uses_primary_project_root(root):
         resolved_root = root or project_root()
@@ -1584,21 +1704,21 @@ def save_inference_packet(
         filename = "inference_packet.json"
         source_path = _write_json_variants(reports_dir, filename, data_source, payload)
         get_dashboard_artifact_store().upsert_json(
-            artifact_key=json_artifact_key(data_source, "inference_packet"),
+            artifact_key=user_json_artifact_key(data_source, "inference_packet", user_id),
             data_source=data_source,
             artifact_kind="json",
             payload=payload,
-            metadata={"source_path": str(source_path)},
+            metadata={"source_path": str(source_path), "user_id": user_id},
         )
         return source_path
 
-    artifact_key = json_artifact_key(data_source, "inference_packet")
+    artifact_key = user_json_artifact_key(data_source, "inference_packet", user_id)
     get_dashboard_artifact_store().upsert_json(
         artifact_key=artifact_key,
         data_source=data_source,
         artifact_kind="json",
         payload=payload,
-        metadata={"artifact_name": "inference_packet"},
+        metadata={"artifact_name": "inference_packet", "user_id": user_id},
     )
     return _artifact_ref(artifact_key)
 
@@ -1611,6 +1731,7 @@ def save_symbol_note(
     note_kind: str,
     plan_date: str,
     content: str,
+    user_id: str | None = None,
 ) -> str:
     if not _uses_primary_project_root(root):
         resolved_root = root or project_root()
@@ -1621,7 +1742,7 @@ def save_symbol_note(
         save_text(content, output_path)
 
         get_dashboard_artifact_store().upsert_text(
-            artifact_key=note_artifact_key(data_source, normalized_symbol, note_kind),
+            artifact_key=_note_artifact_key(data_source, normalized_symbol, note_kind, user_id),
             data_source=data_source,
             artifact_kind="markdown",
             content=content,
@@ -1631,12 +1752,13 @@ def save_symbol_note(
                 "plan_date": plan_date,
                 "symbol": normalized_symbol,
                 "note_kind": note_kind,
+                "user_id": user_id,
             },
         )
         return output_path
 
     normalized_symbol = str(symbol or "").strip()
-    artifact_key = note_artifact_key(data_source, normalized_symbol, note_kind)
+    artifact_key = _note_artifact_key(data_source, normalized_symbol, note_kind, user_id)
     get_dashboard_artifact_store().upsert_text(
         artifact_key=artifact_key,
         data_source=data_source,
@@ -1646,6 +1768,7 @@ def save_symbol_note(
             "plan_date": plan_date,
             "symbol": normalized_symbol,
             "note_kind": note_kind,
+            "user_id": user_id,
         },
     )
     return _artifact_ref(artifact_key)
@@ -1659,6 +1782,7 @@ def save_overlay_outputs(
     candidates: pd.DataFrame,
     packet: dict[str, Any],
     brief: str,
+    user_id: str | None = None,
 ) -> dict[str, str]:
     if not _uses_primary_project_root(root):
         resolved_root = root or project_root()
@@ -1719,30 +1843,31 @@ def save_overlay_outputs(
     candidate_key = "overlay_inference_candidates" if is_inference else "overlay_candidates"
     packet_key = "overlay_inference_packet" if is_inference else "overlay_packet"
     brief_key = "overlay_inference_brief" if is_inference else "overlay_brief"
-    candidate_artifact_key = table_artifact_key(data_source, candidate_key)
-    packet_artifact_key = json_artifact_key(data_source, packet_key)
-    brief_artifact_key = text_artifact_key(data_source, brief_key)
+    candidate_artifact_key = _overlay_table_artifact_key(data_source, candidate_key, user_id)
+    packet_artifact_key = _overlay_json_artifact_key(data_source, packet_key, user_id)
+    brief_artifact_key = _overlay_text_artifact_key(data_source, brief_key, user_id)
+    metadata = {"rows": int(len(candidates)), "scope": scope, "user_id": user_id}
 
     store.upsert_json(
         artifact_key=candidate_artifact_key,
         data_source=data_source,
         artifact_kind="table",
         payload=_frame_records_for_artifact(candidates),
-        metadata={"rows": int(len(candidates)), "scope": scope},
+        metadata=metadata,
     )
     store.upsert_json(
         artifact_key=packet_artifact_key,
         data_source=data_source,
         artifact_kind="json",
         payload=packet,
-        metadata={"scope": scope},
+        metadata={"scope": scope, "user_id": user_id},
     )
     store.upsert_text(
         artifact_key=brief_artifact_key,
         data_source=data_source,
         artifact_kind="text",
         content=brief,
-        metadata={"scope": scope},
+        metadata={"scope": scope, "user_id": user_id},
     )
 
     return {
@@ -1761,6 +1886,7 @@ def save_llm_bridge_outputs(
     request_summary_text: str,
     response_jsonl_text: str = "",
     response_summary_text: str,
+    user_id: str | None = None,
 ) -> dict[str, str]:
     if not _is_within_primary_project_root(reports_dir):
         resolved_reports_dir = ensure_dir(reports_dir)
@@ -1812,8 +1938,18 @@ def save_llm_bridge_outputs(
         )
 
         is_inference = output_prefix == "overlay_inference_llm"
-        response_jsonl_artifact_key = overlay_llm_responses_artifact_key(data_source, "inference" if is_inference else "historical")
-        response_summary_artifact_key = overlay_llm_response_summary_artifact_key(data_source, "inference" if is_inference else "historical")
+        scope = "inference" if is_inference else "historical"
+        artifact_prefix = "overlay_inference" if is_inference else "overlay"
+        response_jsonl_artifact_key = (
+            _overlay_text_artifact_key(data_source, f"{artifact_prefix}_llm_responses", user_id)
+            if user_id
+            else overlay_llm_responses_artifact_key(data_source, scope)
+        )
+        response_summary_artifact_key = (
+            _overlay_text_artifact_key(data_source, f"{artifact_prefix}_llm_response_summary", user_id)
+            if user_id
+            else overlay_llm_response_summary_artifact_key(data_source, scope)
+        )
 
         if response_jsonl_text:
             store.upsert_text(
@@ -1821,14 +1957,14 @@ def save_llm_bridge_outputs(
                 data_source=data_source,
                 artifact_kind="jsonl",
                 content=response_jsonl_text,
-                metadata={"path": str(response_jsonl_path), "name": response_jsonl_path.name},
+                metadata={"path": str(response_jsonl_path), "name": response_jsonl_path.name, "user_id": user_id},
             )
         store.upsert_text(
             artifact_key=response_summary_artifact_key,
             data_source=data_source,
             artifact_kind="markdown",
             content=response_summary_text,
-            metadata={"path": str(response_summary_path), "name": response_summary_path.name},
+            metadata={"path": str(response_summary_path), "name": response_summary_path.name, "user_id": user_id},
         )
 
         return {
@@ -1857,8 +1993,18 @@ def save_llm_bridge_outputs(
     )
 
     is_inference = output_prefix == "overlay_inference_llm"
-    response_jsonl_artifact_key = overlay_llm_responses_artifact_key(data_source, "inference" if is_inference else "historical")
-    response_summary_artifact_key = overlay_llm_response_summary_artifact_key(data_source, "inference" if is_inference else "historical")
+    scope = "inference" if is_inference else "historical"
+    artifact_prefix = "overlay_inference" if is_inference else "overlay"
+    response_jsonl_artifact_key = (
+        _overlay_text_artifact_key(data_source, f"{artifact_prefix}_llm_responses", user_id)
+        if user_id
+        else overlay_llm_responses_artifact_key(data_source, scope)
+    )
+    response_summary_artifact_key = (
+        _overlay_text_artifact_key(data_source, f"{artifact_prefix}_llm_response_summary", user_id)
+        if user_id
+        else overlay_llm_response_summary_artifact_key(data_source, scope)
+    )
 
     if response_jsonl_text:
         store.upsert_text(
@@ -1866,14 +2012,14 @@ def save_llm_bridge_outputs(
             data_source=data_source,
             artifact_kind="jsonl",
             content=response_jsonl_text,
-            metadata={"output_prefix": output_prefix},
+            metadata={"output_prefix": output_prefix, "user_id": user_id},
         )
     store.upsert_text(
         artifact_key=response_summary_artifact_key,
         data_source=data_source,
         artifact_kind="markdown",
         content=response_summary_text,
-        metadata={"output_prefix": output_prefix},
+        metadata={"output_prefix": output_prefix, "user_id": user_id},
     )
 
     return {

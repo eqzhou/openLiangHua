@@ -83,3 +83,12 @@ class PostgresWatchlistStore:
                     (user_id, ts_code, item_type)
                 )
             conn.commit()
+
+    def clear_items(self, user_id: str, item_type: str) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM watchlist_items WHERE user_id = %s AND type = %s",
+                    (user_id, item_type),
+                )
+            conn.commit()

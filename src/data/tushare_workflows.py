@@ -48,6 +48,7 @@ def run_tushare_full_refresh(
     feature_summary = build_feature_label_artifacts(
         root=resolved_root,
         data_source=resolved_target_source,
+        prefer_source_daily_bar=True,
     )
     dashboard_sync_summary = sync_dashboard_artifacts(root=resolved_root, data_source=resolved_target_source)
     return {

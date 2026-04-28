@@ -29,9 +29,16 @@ def run_named_action(action_name: str) -> dict[str, Any]:
     }
 
 
-def generate_watch_plan() -> dict[str, Any]:
+def _user_action_env(user_id: str | None) -> dict[str, str] | None:
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        return None
+    return {"OPENLIANGHUA_USER_ID": normalized_user_id}
+
+
+def generate_watch_plan(user_id: str | None = None) -> dict[str, Any]:
     from src.app.facades.base import clear_dashboard_caches
-    ok, output = run_module("src.agents.watch_plan")
+    ok, output = run_module("src.agents.watch_plan", extra_env=_user_action_env(user_id))
     if ok:
         sync_ok, sync_message = sync_dashboard_database()
         output = f"{output}\n\n[dashboard-db] {sync_message}".strip() if output else f"[dashboard-db] {sync_message}"
@@ -40,9 +47,9 @@ def generate_watch_plan() -> dict[str, Any]:
     return {"actionName": "watch_plan", "ok": ok, "output": output}
 
 
-def generate_action_memo() -> dict[str, Any]:
+def generate_action_memo(user_id: str | None = None) -> dict[str, Any]:
     from src.app.facades.base import clear_dashboard_caches
-    ok, output = run_module("src.agents.action_memo")
+    ok, output = run_module("src.agents.action_memo", extra_env=_user_action_env(user_id))
     if ok:
         sync_ok, sync_message = sync_dashboard_database()
         output = f"{output}\n\n[dashboard-db] {sync_message}".strip() if output else f"[dashboard-db] {sync_message}"

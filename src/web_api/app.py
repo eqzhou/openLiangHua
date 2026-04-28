@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 from time import perf_counter
 from typing import Any
@@ -46,6 +47,8 @@ from src.app.facades import (
     get_watchlist_detail_payload,
     get_watchlist_payload,
     get_watchlist_summary_payload,
+    run_market_bars_refresh_payload,
+    run_watchlist_research_refresh_payload,
     refresh_realtime_payload,
     run_tushare_full_refresh_payload,
     run_tushare_incremental_refresh_payload,
@@ -62,7 +65,7 @@ from src.web_api.auth import (
     set_auth_cookie,
 )
 from src.web_api.settings import ApiSettings, get_api_settings
-from src.web_api.routers import auth_router, watchlist_router
+from src.web_api.routers import watchlist_router
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=100)
@@ -81,9 +84,19 @@ def _build_auth_payload(user: AuthenticatedUser | None) -> dict[str, Any]:
     }
 
 
+def _deep_merge_config(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(base)
+    for key, value in updates.items():
+        current_value = merged.get(key)
+        if isinstance(current_value, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_config(current_value, value)
+        else:
+            merged[key] = value
+    return merged
+
+
 settings = get_api_settings()
 app = FastAPI(title="OpenLianghua Research API", version="0.1.0")
-app.include_router(auth_router)
 app.include_router(watchlist_router)
 logger = logging.getLogger("openlianghua.web_api")
 
@@ -209,23 +222,31 @@ def post_auth_logout(
 
 
 @app.get("/api/shell")
-def get_shell() -> dict[str, Any]:
-    return get_shell_payload()
+def get_shell(
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
+) -> dict[str, Any]:
+    return get_shell_payload(user_id=user.user_id if user else None)
 
 
 @app.get("/api/home")
-def get_home() -> dict[str, Any]:
-    return get_home_payload()
+def get_home(
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
+) -> dict[str, Any]:
+    return get_home_payload(user_id=user.user_id if user else None)
 
 
 @app.get("/api/home/summary")
-def get_home_summary() -> dict[str, Any]:
-    return get_home_summary_payload()
+def get_home_summary(
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
+) -> dict[str, Any]:
+    return get_home_summary_payload(user_id=user.user_id if user else None)
 
 
 @app.get("/api/home/watchlist")
-def get_home_watchlist() -> dict[str, Any]:
-    return get_home_watchlist_section_payload()
+def get_home_watchlist(
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
+) -> dict[str, Any]:
+    return get_home_watchlist_section_payload(user_id=user.user_id if user else None)
 
 
 @app.get("/api/home/candidates")
@@ -234,8 +255,10 @@ def get_home_candidates() -> dict[str, Any]:
 
 
 @app.get("/api/home/ai-review")
-def get_home_ai_review() -> dict[str, Any]:
-    return get_home_ai_review_section_payload()
+def get_home_ai_review(
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
+) -> dict[str, Any]:
+    return get_home_ai_review_section_payload(user_id=user.user_id if user else None)
 
 
 @app.get("/api/config/experiment")
@@ -249,25 +272,25 @@ def update_experiment_config(
     _: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
     current = get_experiment_config_payload()
-    current.update(payload)
-    label_col = str(current.get("label_col", "ret_t1_t10"))
+    merged = _deep_merge_config(current, payload)
+    label_col = str(merged.get("label_col", "ret_t1_t10"))
     if label_col not in LABEL_OPTIONS:
         raise HTTPException(status_code=400, detail="Invalid label_col")
-    return update_experiment_config_payload(current)
+    return update_experiment_config_payload(merged)
 
 
 @app.post("/api/actions/watch-plan")
 def post_watch_plan(
-    _: AuthenticatedUser = Depends(require_authenticated_user),
+    user: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
-    return generate_watch_plan()
+    return generate_watch_plan(user_id=user.user_id)
 
 
 @app.post("/api/actions/action-memo")
 def post_action_memo(
-    _: AuthenticatedUser = Depends(require_authenticated_user),
+    user: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
-    return generate_action_memo()
+    return generate_action_memo(user_id=user.user_id)
 
 
 @app.post("/api/actions/{action_name}")
@@ -287,9 +310,9 @@ def clear_cache(
 
 @app.post("/api/realtime/refresh")
 def refresh_realtime(
-    _: AuthenticatedUser = Depends(require_authenticated_user),
+    user: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
-    return refresh_realtime_payload()
+    return refresh_realtime_payload(user_id=user.user_id)
 
 
 @app.get("/api/data-management")
@@ -313,6 +336,22 @@ def post_tushare_full_refresh(
     _: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
     return run_tushare_full_refresh_payload(target_source=payload.target_source, end_date=payload.end_date)
+
+
+@app.post("/api/data-management/market-bars-refresh")
+def post_market_bars_refresh(
+    payload: DataRefreshRequest,
+    user: AuthenticatedUser = Depends(require_authenticated_user),
+) -> dict[str, Any]:
+    return run_market_bars_refresh_payload(user_id=user.user_id, end_date=payload.end_date)
+
+
+@app.post("/api/data-management/watchlist-research-refresh")
+def post_watchlist_research_refresh(
+    payload: DataRefreshRequest,
+    user: AuthenticatedUser = Depends(require_authenticated_user),
+) -> dict[str, Any]:
+    return run_watchlist_research_refresh_payload(user_id=user.user_id, target_source=payload.target_source)
 
 
 @app.get("/api/overview")
@@ -499,6 +538,7 @@ def get_watchlist(
         page=page,
         symbol=symbol,
         include_realtime=include_realtime,
+        user_id=user.user_id if user else None,
     )
 
 
@@ -521,6 +561,7 @@ def get_watchlist_summary(
         page=page,
         symbol=symbol,
         include_realtime=include_realtime,
+        user_id=user.user_id if user else None,
     )
 
 
@@ -541,6 +582,7 @@ def get_watchlist_detail(
         scope=scope,
         sort_by=sort_by,
         include_realtime=include_realtime,
+        user_id=user.user_id if user else None,
     )
 
 
@@ -548,10 +590,12 @@ def get_watchlist_detail(
 def get_ai_review_summary(
     inference_symbol: str | None = Query(None),
     historical_symbol: str | None = Query(None),
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
 ) -> dict[str, Any]:
     return get_ai_review_summary_payload(
         inference_symbol=inference_symbol,
         historical_symbol=historical_symbol,
+        user_id=user.user_id if user else None,
     )
 
 
@@ -559,19 +603,26 @@ def get_ai_review_summary(
 def get_ai_review_detail(
     scope: str = Query("inference"),
     symbol: str | None = Query(None),
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
 ) -> dict[str, Any]:
     normalized_scope = scope if scope in {"inference", "historical"} else "inference"
-    return get_ai_review_detail_payload(scope=normalized_scope, symbol=symbol)
+    return get_ai_review_detail_payload(
+        scope=normalized_scope,
+        symbol=symbol,
+        user_id=user.user_id if user else None,
+    )
 
 
 @app.get("/api/ai-review")
 def get_ai_review(
     inference_symbol: str | None = Query(None),
     historical_symbol: str | None = Query(None),
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
 ) -> dict[str, Any]:
     return get_ai_review_payload(
         inference_symbol=inference_symbol,
         historical_symbol=historical_symbol,
+        user_id=user.user_id if user else None,
     )
 
 

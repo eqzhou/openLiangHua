@@ -70,6 +70,15 @@ export function AiReviewDetailPage() {
         <span className={`px-1.5 py-0.5 text-erp-sm border rounded shrink-0 bg-white ${getConfidenceTone(selected.confidence_level) === 'good' ? 'text-erp-success border-erp-success/30' : getConfidenceTone(selected.confidence_level) === 'warn' ? 'text-erp-danger border-erp-danger/30' : 'text-gray-500 border-gray-300'}`}>
           置信度: {String(selected.confidence_level || '中')}
         </span>
+        <span className={`px-1.5 py-0.5 text-erp-sm border rounded shrink-0 ${
+          String(selected.watchlist_relation ?? '') === 'holding'
+            ? 'bg-blue-50 text-blue-700 border-blue-200'
+            : String(selected.watchlist_relation ?? '') === 'focus'
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              : 'bg-gray-100 text-gray-500 border-gray-200'
+        }`}>
+          {String(selected.watchlist_relation_label || '未跟踪')}
+        </span>
         <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-erp-sm border border-gray-200 rounded shrink-0">
           序号 {currentPositionLabel}
         </span>

@@ -22,6 +22,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "")).strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     raw = str(os.getenv(name, "")).strip()
     if not raw:
@@ -47,6 +54,7 @@ class ApiSettings:
     bootstrap_password: str
     bootstrap_display_name: str
     bootstrap_title: str
+    auth_cookie_secure: bool = False
 
 
 @lru_cache(maxsize=1)
@@ -69,6 +77,7 @@ def get_api_settings() -> ApiSettings:
             ),
         ),
         auth_cookie_name=_env_text("APP_AUTH_COOKIE_NAME", "openlianghua_session"),
+        auth_cookie_secure=_env_bool("APP_AUTH_COOKIE_SECURE", False),
         auth_session_days=_env_int("APP_AUTH_SESSION_DAYS", 7),
         auth_touch_interval_seconds=_env_int("APP_AUTH_SESSION_TOUCH_INTERVAL_SECONDS", 300),
         bootstrap_username=_env_text("APP_BOOTSTRAP_USERNAME", "admin"),

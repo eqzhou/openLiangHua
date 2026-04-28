@@ -70,13 +70,14 @@ def _build_home_alerts(
     return alerts
 
 
-def _get_home_watchlist_payload() -> dict[str, Any]:
+def _get_home_watchlist_payload(user_id: str | None = None) -> dict[str, Any]:
     from src.app.facades.watchlist_facade import get_watchlist_summary_payload
     payload = get_watchlist_summary_payload(
         keyword="",
         scope="all",
         sort_by="inference_rank",
         include_realtime=False,
+        user_id=user_id,
     )
     records = list(payload.get("records", []) or [])[:6]
     return {
@@ -86,27 +87,27 @@ def _get_home_watchlist_payload() -> dict[str, Any]:
     }
 
 
-def _get_home_payload_cached() -> dict[str, Any]:
+def _get_home_payload_cached(user_id: str | None = None) -> dict[str, Any]:
     return {
-        **get_home_summary_payload(),
-        "watchlist": get_home_watchlist_section_payload(),
+        **get_home_summary_payload(user_id=user_id),
+        "watchlist": get_home_watchlist_section_payload(user_id=user_id),
         "candidates": get_home_candidates_section_payload(),
-        "aiReview": get_home_ai_review_section_payload(),
+        "aiReview": get_home_ai_review_section_payload(user_id=user_id),
     }
 
 
-def get_home_payload() -> dict[str, Any]:
-    return copy.deepcopy(_get_home_payload_cached())
+def get_home_payload(user_id: str | None = None) -> dict[str, Any]:
+    return copy.deepcopy(_get_home_payload_cached(user_id=user_id))
 
 
-def get_home_summary_payload() -> dict[str, Any]:
+def get_home_summary_payload(user_id: str | None = None) -> dict[str, Any]:
     from src.app.facades.service_facade import get_shell_payload
     from src.app.facades.overview_facade import get_overview_summary_payload
     from src.app.facades.shared_utils_facade import _best_comparison_record
     
-    shell_payload = get_shell_payload()
+    shell_payload = get_shell_payload(user_id=user_id)
     overview_payload = get_overview_summary_payload("test")
-    watchlist_payload = _get_home_watchlist_payload()
+    watchlist_payload = _get_home_watchlist_payload(user_id=user_id)
     comparison = list(overview_payload.get("comparison", []) or [])
     return {
         "configSummaryText": str(shell_payload.get("configSummaryText", "") or ""),
@@ -127,8 +128,8 @@ def get_home_summary_payload() -> dict[str, Any]:
     }
 
 
-def get_home_watchlist_section_payload() -> dict[str, Any]:
-    watchlist_payload = _get_home_watchlist_payload()
+def get_home_watchlist_section_payload(user_id: str | None = None) -> dict[str, Any]:
+    watchlist_payload = _get_home_watchlist_payload(user_id=user_id)
     watchlist_records = list(watchlist_payload.get("records", []) or [])[:6]
     focus_watch_record = dict(watchlist_records[0]) if watchlist_records else {}
     return {
@@ -152,9 +153,9 @@ def get_home_candidates_section_payload() -> dict[str, Any]:
     }
 
 
-def get_home_ai_review_section_payload() -> dict[str, Any]:
+def get_home_ai_review_section_payload(user_id: str | None = None) -> dict[str, Any]:
     from src.app.facades.ai_review_facade import get_ai_review_summary_payload
-    ai_review_payload = get_ai_review_summary_payload()
+    ai_review_payload = get_ai_review_summary_payload(user_id=user_id)
     inference_records = list(dict(ai_review_payload.get("inference", {}) or {}).get("candidates", []) or [])[:6]
     historical_records = list(dict(ai_review_payload.get("historical", {}) or {}).get("candidates", []) or [])[:6]
     focus_candidate_record = (
@@ -166,5 +167,5 @@ def get_home_ai_review_section_payload() -> dict[str, Any]:
         "inferenceRecords": _json_ready(inference_records),
         "historicalRecords": _json_ready(historical_records),
         "focusRecord": _json_ready(focus_candidate_record),
-        "shortlistMarkdown": load_overlay_inference_shortlist(),
+        "shortlistMarkdown": load_overlay_inference_shortlist(user_id=user_id),
     }

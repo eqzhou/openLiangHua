@@ -53,8 +53,8 @@ class DashboardDataServiceTests(unittest.TestCase):
 
         clear_dashboard_data_caches()
         with (
-            patch("src.app.services.dashboard_data_service.repo_load_watchlist_snapshot", return_value=stored_snapshot) as snapshot_loader,
-            patch("src.app.services.dashboard_data_service.build_watchlist_view", side_effect=AssertionError("should not rebuild watchlist view")),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_watchlist_snapshot", return_value=stored_snapshot) as snapshot_loader,
+            patch("src.app.services.dashboard_snapshot_service.build_watchlist_view", side_effect=AssertionError("should not rebuild watchlist view")),
         ):
             frame = build_watchlist_base_frame()
 
@@ -76,20 +76,55 @@ class DashboardDataServiceTests(unittest.TestCase):
 
         clear_dashboard_data_caches()
         with (
-            patch("src.app.services.dashboard_data_service.repo_load_watchlist_snapshot", return_value=None),
-            patch("src.app.services.dashboard_data_service.load_watchlist_config", return_value={"holdings": [], "focus_pool": []}),
-            patch("src.app.services.dashboard_data_service.load_daily_bar", return_value=pd.DataFrame()),
-            patch("src.app.services.dashboard_data_service.load_predictions", return_value=pd.DataFrame()),
-            patch("src.app.services.dashboard_data_service.load_overlay_candidates", return_value=pd.DataFrame()),
-            patch("src.app.services.dashboard_data_service.load_overlay_inference_candidates", return_value=pd.DataFrame()),
-            patch("src.app.services.dashboard_data_service.build_watchlist_view", return_value=built_snapshot),
-            patch("src.app.services.dashboard_data_service.sync_watchlist_snapshot_artifact") as sync_snapshot,
+            patch("src.app.services.dashboard_snapshot_service.repo_load_watchlist_snapshot", return_value=None),
+            patch("src.app.services.dashboard_snapshot_service.load_watchlist_config", return_value={"holdings": [], "focus_pool": []}),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_daily_bar", return_value=pd.DataFrame()),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_predictions", return_value=pd.DataFrame()),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_overlay_candidates", return_value=pd.DataFrame()),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_overlay_inference_candidates", return_value=pd.DataFrame()),
+            patch("src.app.services.dashboard_snapshot_service.build_watchlist_view", return_value=built_snapshot),
+            patch("src.app.services.dashboard_snapshot_service.sync_watchlist_snapshot_artifact") as sync_snapshot,
         ):
             frame = build_watchlist_base_frame()
 
         self.assertEqual(len(frame), 1)
         self.assertEqual(frame.iloc[0]["ts_code"], "000002.SZ")
         sync_snapshot.assert_called_once()
+
+    def test_watchlist_base_frame_uses_global_historical_and_user_inference_artifacts(self) -> None:
+        built_snapshot = pd.DataFrame(
+            [
+                {
+                    "ts_code": "000002.SZ",
+                    "name": "后备股票",
+                    "entry_group": "重点关注",
+                    "mark_price": 12.5,
+                }
+            ]
+        )
+
+        clear_dashboard_data_caches()
+        with (
+            patch("src.app.services.dashboard_snapshot_service.repo_load_watchlist_snapshot", return_value=None),
+            patch("src.app.services.dashboard_snapshot_service.load_watchlist_config", return_value={"holdings": [], "focus_pool": [{"ts_code": "000002.SZ"}]}),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_daily_bar", return_value=pd.DataFrame()),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_predictions", return_value=pd.DataFrame()) as prediction_loader,
+            patch("src.app.services.dashboard_snapshot_service.repo_load_overlay_candidates", return_value=pd.DataFrame()) as historical_overlay_loader,
+            patch("src.app.services.dashboard_snapshot_service.repo_load_overlay_inference_candidates", return_value=pd.DataFrame()) as inference_overlay_loader,
+            patch("src.app.services.dashboard_snapshot_service.build_watchlist_view", return_value=built_snapshot),
+            patch("src.app.services.dashboard_snapshot_service.sync_watchlist_snapshot_artifact"),
+        ):
+            frame = build_watchlist_base_frame(user_id="user-1")
+
+        self.assertEqual(len(frame), 1)
+        self.assertNotIn("user_id", historical_overlay_loader.call_args.kwargs)
+        self.assertEqual(inference_overlay_loader.call_args.kwargs["user_id"], "user-1")
+        inference_prediction_calls = [
+            call
+            for call in prediction_loader.call_args_list
+            if call.kwargs.get("model_name") == "ensemble" and call.kwargs.get("split_name") == "inference"
+        ]
+        self.assertEqual(inference_prediction_calls[0].kwargs["user_id"], "user-1")
 
     def test_candidate_snapshot_prefers_stored_artifact(self) -> None:
         stored_snapshot = pd.DataFrame(
@@ -105,8 +140,8 @@ class DashboardDataServiceTests(unittest.TestCase):
 
         clear_dashboard_data_caches()
         with (
-            patch("src.app.services.dashboard_data_service.repo_load_candidate_snapshot", return_value=stored_snapshot) as snapshot_loader,
-            patch("src.app.services.dashboard_data_service.load_predictions", side_effect=AssertionError("should not load predictions")),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_candidate_snapshot", return_value=stored_snapshot) as snapshot_loader,
+            patch("src.app.services.dashboard_snapshot_service.repo_load_predictions", side_effect=AssertionError("should not load predictions")),
         ):
             frame = build_candidate_snapshot("ensemble", "test")
 
@@ -124,9 +159,9 @@ class DashboardDataServiceTests(unittest.TestCase):
 
         clear_dashboard_data_caches()
         with (
-            patch("src.app.services.dashboard_data_service.repo_load_candidate_snapshot", return_value=None),
-            patch("src.app.services.dashboard_data_service.load_predictions", return_value=predictions),
-            patch("src.app.services.dashboard_data_service.sync_candidate_snapshot_artifact") as sync_snapshot,
+            patch("src.app.services.dashboard_snapshot_service.repo_load_candidate_snapshot", return_value=None),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_predictions", return_value=predictions),
+            patch("src.app.services.dashboard_snapshot_service.sync_candidate_snapshot_artifact") as sync_snapshot,
         ):
             frame = build_candidate_snapshot("ensemble", "test")
 
@@ -146,8 +181,8 @@ class DashboardDataServiceTests(unittest.TestCase):
 
         clear_dashboard_data_caches()
         with (
-            patch("src.app.services.dashboard_data_service.repo_load_factor_explorer_snapshot", return_value=stored_snapshot) as snapshot_loader,
-            patch("src.app.services.dashboard_data_service.load_feature_panel", side_effect=AssertionError("should not load full feature panel")),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_factor_explorer_snapshot", return_value=stored_snapshot) as snapshot_loader,
+            patch("src.app.services.dashboard_snapshot_service.repo_load_feature_panel", side_effect=AssertionError("should not load full feature panel")),
         ):
             payload = build_factor_explorer_snapshot()
 
@@ -166,9 +201,9 @@ class DashboardDataServiceTests(unittest.TestCase):
 
         clear_dashboard_data_caches()
         with (
-            patch("src.app.services.dashboard_data_service.repo_load_factor_explorer_snapshot", return_value=None),
-            patch("src.app.services.dashboard_data_service.load_feature_panel", return_value=feature_panel),
-            patch("src.app.services.dashboard_data_service.sync_factor_explorer_snapshot_artifact") as sync_snapshot,
+            patch("src.app.services.dashboard_snapshot_service.repo_load_factor_explorer_snapshot", return_value=None),
+            patch("src.app.services.dashboard_snapshot_service.repo_load_feature_panel", return_value=feature_panel),
+            patch("src.app.services.dashboard_snapshot_service.sync_factor_explorer_snapshot_artifact") as sync_snapshot,
         ):
             payload = build_factor_explorer_snapshot()
 

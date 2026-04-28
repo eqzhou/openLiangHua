@@ -86,6 +86,7 @@ def save_overlay_inference_shortlist(
     response_lookup: dict[str, dict[str, Any]],
     root: Path | None = None,
     data_source: str,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     rows = build_trader_shortlist_rows(packet=packet, response_lookup=response_lookup)
     markdown = build_trader_shortlist_markdown(
@@ -99,6 +100,7 @@ def save_overlay_inference_shortlist(
         filename="overlay_inference_shortlist.md",
         content=markdown,
         artifact_name="overlay_inference_shortlist",
+        user_id=user_id,
     )
     return {
         "rows": rows,

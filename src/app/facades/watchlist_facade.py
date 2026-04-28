@@ -53,11 +53,43 @@ def _watchlist_overview_payload(frame: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def _cached_realtime_snapshot_for_symbols(latest_snapshot: Any, symbols: list[str]) -> tuple[pd.DataFrame, dict[str, Any]]:
+    normalized_symbols = [str(symbol or "").strip() for symbol in symbols if str(symbol or "").strip()]
+    if latest_snapshot is None or not normalized_symbols:
+        return pd.DataFrame(), _empty_realtime_status()
+
+    quotes = getattr(latest_snapshot, "quotes", pd.DataFrame())
+    if quotes is None or quotes.empty or "ts_code" not in quotes.columns:
+        filtered_quotes = pd.DataFrame()
+    else:
+        symbol_set = set(normalized_symbols)
+        filtered_quotes = quotes.loc[quotes["ts_code"].astype(str).isin(symbol_set)].copy()
+
+    status = {
+        **dict(getattr(latest_snapshot, "status", {}) or {}),
+        "available": not filtered_quotes.empty,
+        "requested_symbol_count": len(normalized_symbols),
+        "success_symbol_count": int(len(filtered_quotes)),
+        "failed_symbols": [
+            symbol
+            for symbol in normalized_symbols
+            if filtered_quotes.empty or symbol not in set(filtered_quotes["ts_code"].astype(str).tolist())
+        ],
+        "trade_date": getattr(latest_snapshot, "trade_date", ""),
+        "snapshot_bucket": getattr(latest_snapshot, "snapshot_bucket", ""),
+        "served_from": "database",
+    }
+    if filtered_quotes.empty:
+        status["error_message"] = status.get("error_message", "")
+    return filtered_quotes, _decorate_realtime_status(status)
+
+
 def _refresh_watchlist_realtime_snapshot(
     *,
     now: pd.Timestamp | None = None,
+    user_id: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any], list[str], dict[str, float]]:
-    watchlist_view = build_watchlist_base_frame()
+    watchlist_view = build_watchlist_base_frame(user_id=user_id)
     symbols, previous_close_lookup = _watchlist_realtime_context(watchlist_view)
     if not symbols:
         return pd.DataFrame(), _decorate_realtime_status(_empty_realtime_status()), symbols, previous_close_lookup
@@ -77,12 +109,14 @@ def _resolve_watchlist_view(
     sort_by: str = "inference_rank",
     symbol: str | None = None,
     include_realtime: bool = False,
+    user_id: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, str, dict[str, Any], list[str], dict[str, float]]:
-    watchlist_view = build_watchlist_base_frame()
+    watchlist_view = build_watchlist_base_frame(user_id=user_id)
     realtime_status = _empty_realtime_status()
     if not watchlist_view.empty:
+        watchlist_symbols, _ = _watchlist_realtime_context(watchlist_view)
         if include_realtime:
-            realtime_quotes, realtime_status, _, _ = _refresh_watchlist_realtime_snapshot()
+            realtime_quotes, realtime_status, _, _ = _refresh_watchlist_realtime_snapshot(user_id=user_id)
             if not realtime_quotes.empty:
                 watchlist_view = merge_realtime_quotes(watchlist_view, realtime_quotes)
         else:
@@ -96,17 +130,9 @@ def _resolve_watchlist_view(
                         "error_message": f"读取缓存快照失败：{exc}",
                     }
                 )
-            if latest_snapshot is not None and not latest_snapshot.quotes.empty:
-                watchlist_view = merge_realtime_quotes(watchlist_view, latest_snapshot.quotes)
-                realtime_status = _decorate_realtime_status(
-                    {
-                        **dict(latest_snapshot.status),
-                        "available": True,
-                        "trade_date": latest_snapshot.trade_date,
-                        "snapshot_bucket": latest_snapshot.snapshot_bucket,
-                        "served_from": "database",
-                    }
-                )
+            realtime_quotes, realtime_status = _cached_realtime_snapshot_for_symbols(latest_snapshot, watchlist_symbols)
+            if not realtime_quotes.empty:
+                watchlist_view = merge_realtime_quotes(watchlist_view, realtime_quotes)
 
     filtered = filtered_watchlist_view(
         watchlist_view,
@@ -160,16 +186,19 @@ def get_watchlist_payload(
     keyword: str = "",
     scope: str = "all",
     sort_by: str = "inference_rank",
+    page: int = 1,
     symbol: str | None = None,
     include_realtime: bool = False,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     summary = get_watchlist_summary_payload(
         keyword=keyword,
         scope=scope,
         sort_by=sort_by,
-        page=1,
+        page=page,
         symbol=symbol,
         include_realtime=include_realtime,
+        user_id=user_id,
     )
     detail = get_watchlist_detail_payload(
         symbol=str(summary.get("selectedSymbol", "") or ""),
@@ -177,6 +206,7 @@ def get_watchlist_payload(
         scope=scope,
         sort_by=sort_by,
         include_realtime=include_realtime,
+        user_id=user_id,
     )
     return {**summary, **detail}
 
@@ -215,6 +245,7 @@ def get_watchlist_summary_payload(
     page: int = 1,
     symbol: str | None = None,
     include_realtime: bool = False,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     page_size = 30
     if not include_realtime:
@@ -225,42 +256,16 @@ def get_watchlist_summary_payload(
             sort_by=sort_by,
             page=page,
             page_size=page_size,
+            user_id=user_id,
         )
         refresh_context_rows = load_watchlist_summary_records(
             ["ts_code", "latest_bar_close"],
             keyword="",
             scope="all",
             sort_by="inference_rank",
+            user_id=user_id,
         )
         selected_symbol = str(symbol or (summary_records[0].get("ts_code", "") if summary_records else "") or "")
-        records_frame = pd.DataFrame(summary_records)
-        realtime_status = _empty_realtime_status()
-        if summary_records:
-            try:
-                latest_snapshot = get_realtime_quote_store().get_latest_snapshot()
-            except Exception:
-                latest_snapshot = None
-            if latest_snapshot is not None and not latest_snapshot.quotes.empty:
-                records_frame = merge_realtime_quotes(records_frame, latest_snapshot.quotes)
-                realtime_status = _decorate_realtime_status(
-                    {
-                        **dict(latest_snapshot.status),
-                        "available": True,
-                        "trade_date": latest_snapshot.trade_date,
-                        "snapshot_bucket": latest_snapshot.snapshot_bucket,
-                        "served_from": "database",
-                    }
-                )
-                summary_records = merge_realtime_quote_records(summary_records, latest_snapshot.quotes)
-        selected_record = {}
-        if selected_symbol:
-            selected_record = next(
-                (dict(record) for record in summary_records if str(record.get("ts_code", "") or "") == selected_symbol),
-                {},
-            )
-        if not selected_record and selected_symbol:
-            selected_record = load_watchlist_record(selected_symbol, WATCHLIST_SUMMARY_RECORD_FIELDS)
-
         refresh_symbols: list[str] = []
         refresh_previous_closes: dict[str, float] = {}
         for row in refresh_context_rows:
@@ -272,10 +277,32 @@ def get_watchlist_summary_payload(
             if pd.notna(latest_bar_close):
                 refresh_previous_closes[symbol_value] = float(latest_bar_close)
 
-        filtered_count = load_watchlist_filtered_count(keyword=keyword, scope=scope)
+        realtime_status = _empty_realtime_status()
+        if summary_records:
+            try:
+                latest_snapshot = get_realtime_quote_store().get_latest_snapshot()
+            except Exception:
+                latest_snapshot = None
+            realtime_quotes, realtime_status = _cached_realtime_snapshot_for_symbols(latest_snapshot, refresh_symbols)
+            if not realtime_quotes.empty:
+                summary_records = merge_realtime_quote_records(summary_records, realtime_quotes)
+        selected_record = {}
+        if selected_symbol:
+            selected_record = next(
+                (dict(record) for record in summary_records if str(record.get("ts_code", "") or "") == selected_symbol),
+                {},
+            )
+        if not selected_record and selected_symbol:
+            selected_record = load_watchlist_record(
+                selected_symbol,
+                WATCHLIST_SUMMARY_RECORD_FIELDS,
+                user_id=user_id,
+            )
+
+        filtered_count = load_watchlist_filtered_count(keyword=keyword, scope=scope, user_id=user_id)
         total_pages = max(1, (filtered_count + page_size - 1) // page_size) if filtered_count else 1
         return {
-            "overview": _json_ready(load_watchlist_overview()),
+            "overview": _json_ready(load_watchlist_overview(user_id=user_id)),
             "realtimeStatus": _json_ready(realtime_status),
             "filters": {
                 "keyword": keyword,
@@ -299,6 +326,7 @@ def get_watchlist_summary_payload(
         sort_by=sort_by,
         symbol=symbol,
         include_realtime=include_realtime,
+        user_id=user_id,
     )
     selected_row = filtered.loc[filtered["ts_code"].astype(str) == selected_symbol].head(1) if selected_symbol and not filtered.empty else pd.DataFrame()
     selected_record = _project_record_fields(selected_row.iloc[0].to_dict(), WATCHLIST_SUMMARY_RECORD_FIELDS) if not selected_row.empty else {}
@@ -332,12 +360,13 @@ def get_watchlist_detail_payload(
     scope: str = "all",
     sort_by: str = "inference_rank",
     include_realtime: bool = False,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     from src.app.services.dashboard_data_service import load_overlay_inference_shortlist
     selected_symbol = str(symbol or "").strip()
     selected_row = pd.DataFrame()
     if selected_symbol:
-        selected_record = load_watchlist_record(selected_symbol)
+        selected_record = load_watchlist_record(selected_symbol, user_id=user_id)
         if selected_record:
             if include_realtime:
                 previous_close_lookup: dict[str, float] = {}
@@ -373,6 +402,7 @@ def get_watchlist_detail_payload(
                 sort_by=sort_by,
                 symbol=symbol,
                 include_realtime=include_realtime,
+                user_id=user_id,
             )
             selected_row = filtered.loc[filtered["ts_code"].astype(str) == selected_symbol].head(1) if selected_symbol and not filtered.empty else pd.DataFrame()
     else:
@@ -382,6 +412,7 @@ def get_watchlist_detail_payload(
             sort_by=sort_by,
             symbol=symbol,
             include_realtime=include_realtime,
+            user_id=user_id,
         )
         selected_row = filtered.loc[filtered["ts_code"].astype(str) == selected_symbol].head(1) if selected_symbol and not filtered.empty else pd.DataFrame()
 
@@ -404,8 +435,8 @@ def get_watchlist_detail_payload(
         discussion_snapshot = row.get("llm_discussion_snapshot")
         if isinstance(discussion_snapshot, dict):
             discussion_rows = discussion_round_rows(discussion_snapshot)
-        watch_plan = load_latest_symbol_markdown(selected_symbol, "watch_plan")
-        action_memo = load_latest_symbol_markdown(selected_symbol, "action_memo")
+        watch_plan = load_latest_symbol_markdown(selected_symbol, "watch_plan", user_id=user_id)
+        action_memo = load_latest_symbol_markdown(selected_symbol, "action_memo", user_id=user_id)
 
     return {
         "selectedSymbol": selected_symbol,

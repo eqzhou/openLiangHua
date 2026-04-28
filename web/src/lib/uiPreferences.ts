@@ -17,6 +17,16 @@ export interface TablePreferenceState {
 const THEME_STORAGE_KEY = 'openlianghua.ui.theme'
 const TABLE_PREFERENCES_PREFIX = 'openlianghua.table.preferences.'
 export const UI_PREFERENCES_RESET_EVENT = 'openlianghua:ui-preferences-reset'
+let activePreferenceScope = 'public'
+
+function normalizePreferenceScope(scope: string | null | undefined): string {
+  const normalized = String(scope ?? '').trim()
+  return normalized || 'public'
+}
+
+export function setUiPreferenceScope(scope: string | null | undefined) {
+  activePreferenceScope = normalizePreferenceScope(scope)
+}
 
 function getBrowserStorage(): StorageLike | null {
   if (typeof window === 'undefined') {
@@ -107,7 +117,7 @@ function normalizeWidths(columns: string[], candidate: unknown): Record<string, 
 }
 
 function getTablePreferenceStorageKey(storageKey: string) {
-  return `${TABLE_PREFERENCES_PREFIX}${storageKey}`
+  return `${TABLE_PREFERENCES_PREFIX}${activePreferenceScope}.${storageKey}`
 }
 
 export function readThemeMode(storage: StorageLike | null = getBrowserStorage()): ThemeMode | null {
@@ -199,7 +209,7 @@ export function clearUiPreferences(storage: StorageLike | null = getBrowserStora
       (item): item is string => Boolean(item),
     )
     keys.forEach((key) => {
-      if (key.startsWith(TABLE_PREFERENCES_PREFIX)) {
+      if (key.startsWith(`${TABLE_PREFERENCES_PREFIX}${activePreferenceScope}.`)) {
         storage.removeItem(key)
       }
     })

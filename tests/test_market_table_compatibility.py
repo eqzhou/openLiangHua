@@ -11,6 +11,32 @@ from src.app.repositories import holding_repository, report_repository
 
 
 class MarketTableCompatibilityTests(unittest.TestCase):
+    def test_market_daily_bar_loader_matches_suffixed_symbols(self) -> None:
+        rows = [
+            {
+                "trade_date": "2026-04-17",
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "industry": "银行",
+                "open": 10.0,
+                "close": 10.2,
+                "high": 10.3,
+                "low": 9.9,
+                "amount": 1000,
+                "market": None,
+            }
+        ]
+
+        with patch("src.app.repositories.postgres_market_repository._load_query_rows", return_value=rows) as load_rows:
+            from src.app.repositories.postgres_market_repository import load_daily_bar_from_market_database
+
+            loaded = load_daily_bar_from_market_database(["000001.SZ"])
+
+        self.assertEqual(loaded["ts_code"].tolist(), ["000001.SZ"])
+        params = load_rows.call_args.args[1]
+        self.assertIn("000001.SZ", params[0])
+        self.assertIn("000001", params[1])
+
     def test_report_daily_bar_falls_back_to_market_database_when_file_missing(self) -> None:
         frame = pd.DataFrame(
             [{"trade_date": "2026-04-08", "ts_code": "000001.SZ", "name": "平安银行", "close": 10.2}]

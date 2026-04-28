@@ -51,6 +51,15 @@ class WebApiAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"authenticated": False, "user": None})
 
+    def test_auth_routes_are_registered_once(self) -> None:
+        auth_routes = [
+            (route.path, tuple(sorted(route.methods)))
+            for route in app.routes
+            if getattr(route, "path", "").startswith("/api/auth")
+        ]
+
+        self.assertEqual(len(auth_routes), len(set(auth_routes)))
+
     def test_auth_login_sets_cookie_and_returns_user_payload(self) -> None:
         response = self.client.post(
             "/api/auth/login",
@@ -112,11 +121,12 @@ class WebApiAuthTests(unittest.TestCase):
 
         self.assertEqual(login.status_code, 200)
 
-        with patch("src.web_api.app.refresh_realtime_payload", return_value={"ok": True, "realtimeStatus": {"available": True}}):
+        with patch("src.web_api.app.refresh_realtime_payload", return_value={"ok": True, "realtimeStatus": {"available": True}}) as refresh_payload:
             response = self.client.post("/api/realtime/refresh")
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
+        self.assertEqual(refresh_payload.call_args.kwargs["user_id"], "user-1")
 
     def test_data_management_endpoint_includes_sensitive_fields_after_login(self) -> None:
         login = self.client.post(
@@ -135,10 +145,67 @@ class WebApiAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["includeSensitive"])
 
+    def test_experiment_config_update_deep_merges_nested_sections(self) -> None:
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "secret"},
+        )
+
+        self.assertEqual(login.status_code, 200)
+
+        current_config = {
+            "label_col": "ret_t1_t10",
+            "top_n": 20,
+            "rolling": {
+                "enabled": True,
+                "retrain_frequency": "monthly",
+                "min_history_size": 252,
+            },
+        }
+
+        with (
+            patch("src.web_api.app.get_experiment_config_payload", return_value=current_config),
+            patch("src.web_api.app.update_experiment_config_payload", side_effect=lambda payload: payload) as update_payload,
+        ):
+            response = self.client.put("/api/config/experiment", json={"rolling": {"enabled": False}})
+
+        self.assertEqual(response.status_code, 200)
+        merged_payload = update_payload.call_args.args[0]
+        self.assertFalse(merged_payload["rolling"]["enabled"])
+        self.assertEqual(merged_payload["rolling"]["retrain_frequency"], "monthly")
+        self.assertEqual(merged_payload["rolling"]["min_history_size"], 252)
+
     def test_watchlist_realtime_read_requires_login_when_refresh_requested(self) -> None:
         response = self.client.get("/api/watchlist/summary?include_realtime=true")
 
         self.assertEqual(response.status_code, 401)
+
+    def test_watchlist_summary_read_passes_logged_in_user_scope(self) -> None:
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "secret"},
+        )
+
+        self.assertEqual(login.status_code, 200)
+
+        with patch(
+            "src.web_api.app.get_watchlist_summary_payload",
+            return_value={"records": [], "overview": {}},
+        ) as payload_loader:
+            response = self.client.get("/api/watchlist/summary")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload_loader.call_args.kwargs["user_id"], "user-1")
+
+    def test_watchlist_summary_read_keeps_public_scope_without_login(self) -> None:
+        with patch(
+            "src.web_api.app.get_watchlist_summary_payload",
+            return_value={"records": [], "overview": {}},
+        ) as payload_loader:
+            response = self.client.get("/api/watchlist/summary")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(payload_loader.call_args.kwargs["user_id"])
 
     def test_watch_plan_endpoint_succeeds_after_login(self) -> None:
         login = self.client.post(
@@ -148,11 +215,12 @@ class WebApiAuthTests(unittest.TestCase):
 
         self.assertEqual(login.status_code, 200)
 
-        with patch("src.web_api.app.generate_watch_plan", return_value={"actionName": "watch_plan", "ok": True}):
+        with patch("src.web_api.app.generate_watch_plan", return_value={"actionName": "watch_plan", "ok": True}) as generate_payload:
             response = self.client.post("/api/actions/watch-plan")
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
+        self.assertEqual(generate_payload.call_args.kwargs["user_id"], "user-1")
 
     def test_action_memo_endpoint_succeeds_after_login(self) -> None:
         login = self.client.post(
@@ -162,11 +230,12 @@ class WebApiAuthTests(unittest.TestCase):
 
         self.assertEqual(login.status_code, 200)
 
-        with patch("src.web_api.app.generate_action_memo", return_value={"actionName": "action_memo", "ok": True}):
+        with patch("src.web_api.app.generate_action_memo", return_value={"actionName": "action_memo", "ok": True}) as generate_payload:
             response = self.client.post("/api/actions/action-memo")
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
+        self.assertEqual(generate_payload.call_args.kwargs["user_id"], "user-1")
 
     def test_logout_clears_session_cookie(self) -> None:
         login = self.client.post(

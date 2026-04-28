@@ -182,6 +182,32 @@ def save_panel_run(payload: dict[str, Any]) -> None:
         conn.commit()
 
 
+def delete_research_panel_source(*, data_source: str) -> int:
+    ensure_research_panel_schema()
+    with connect_database() as conn:
+        with conn.cursor() as cur:
+            cur.execute("delete from research.panel where data_source = %s", (data_source,))
+            deleted_rows = int(cur.rowcount or 0)
+        conn.commit()
+    return deleted_rows
+
+
+def delete_research_panel_symbols(*, data_source: str, symbols: list[str]) -> int:
+    normalized_symbols = sorted({str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()})
+    if not normalized_symbols:
+        return 0
+    ensure_research_panel_schema()
+    with connect_database() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "delete from research.panel where data_source = %s and ts_code = any(%s)",
+                (data_source, normalized_symbols),
+            )
+            deleted_rows = int(cur.rowcount or 0)
+        conn.commit()
+    return deleted_rows
+
+
 def _py_value(value: Any) -> Any:
     if value is None or pd.isna(value):
         return None

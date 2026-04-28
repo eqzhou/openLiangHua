@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import os
 from pathlib import Path
 
 import pandas as pd
 
 from src.app.repositories.config_repository import load_experiment_config, load_universe_config
+from src.app.repositories.postgres_watchlist_store import PostgresWatchlistStore
 from src.app.repositories.research_panel_repository import load_research_panel
 from src.app.repositories.report_repository import (
     load_feature_panel,
@@ -16,6 +18,10 @@ from src.app.repositories.report_repository import (
 from src.data.akshare_client import AKShareClient
 from src.utils.data_source import active_data_source, normalize_data_source
 from src.utils.io import project_root
+from src.utils.logger import configure_logging
+from src.web_api.settings import get_api_settings
+
+logger = configure_logging()
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,38 @@ def _scoped_universe_kwargs(workspace: ModelWorkspace) -> dict[str, object]:
     return {}
 
 
+def _model_universe_user_id(user_id: str | None = None) -> str:
+    return str(user_id if user_id is not None else os.getenv("OPENLIANGHUA_USER_ID", "")).strip()
+
+
+def _dedupe_symbols(symbols: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for symbol in symbols:
+        normalized = str(symbol or "").strip().upper()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            deduped.append(normalized)
+    return deduped
+
+
+def _watchlist_symbols_for_model_universe(user_id: str | None = None) -> list[str]:
+    resolved_user_id = _model_universe_user_id(user_id)
+    if not resolved_user_id:
+        return []
+    try:
+        watchlist = PostgresWatchlistStore(get_api_settings()).load_watchlist(resolved_user_id)
+    except Exception as exc:
+        logger.warning("Failed to load model universe from watchlist_items for user {}: {}", resolved_user_id, exc)
+        return []
+
+    symbols = [
+        str(item.get("ts_code", "") or "")
+        for item in [*(watchlist.get("holdings", []) or []), *(watchlist.get("focus_pool", []) or [])]
+    ]
+    return _dedupe_symbols(symbols)
+
+
 @lru_cache(maxsize=8)
 def _current_index_symbols(index_code: str) -> tuple[str, ...]:
     normalized_index_code = str(index_code or "").strip()
@@ -97,13 +135,19 @@ def build_model_panel(
     *,
     date_from: str | None = None,
     date_to: str | None = None,
+    user_id: str | None = None,
 ) -> pd.DataFrame:
     if _use_database_artifacts(workspace.root):
+        resolved_user_id = _model_universe_user_id(user_id)
+        watchlist_symbols = _watchlist_symbols_for_model_universe(resolved_user_id)
+        if resolved_user_id and not watchlist_symbols:
+            raise RuntimeError(f"No watchlist_items symbols were found for user {resolved_user_id}.")
+        universe_kwargs = {"symbols": watchlist_symbols} if watchlist_symbols else _scoped_universe_kwargs(workspace)
         panel = load_research_panel(
             data_source=workspace.data_source,
             date_from=date_from,
             date_to=date_to,
-            **_scoped_universe_kwargs(workspace),
+            **universe_kwargs,
         )
         if not panel.empty and "trade_date" in panel.columns:
             panel["trade_date"] = pd.to_datetime(panel["trade_date"], errors="coerce")
@@ -120,6 +164,7 @@ def load_prediction_artifact(
     *,
     model_name: str,
     split_name: str,
+    user_id: str | None = None,
 ) -> pd.DataFrame:
     use_database_artifacts = _use_database_artifacts(workspace.root)
     frame = load_predictions(
@@ -128,6 +173,7 @@ def load_prediction_artifact(
         model_name=model_name,
         split_name=split_name,
         prefer_database=use_database_artifacts,
+        user_id=user_id,
     )
     if "trade_date" in frame.columns:
         frame = frame.copy()

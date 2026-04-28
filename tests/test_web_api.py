@@ -258,6 +258,11 @@ class WebApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
 
+    def test_market_bars_refresh_endpoint_requires_auth(self) -> None:
+        response = self.client.post("/api/data-management/market-bars-refresh", json={"target_source": "tushare"})
+
+        self.assertEqual(response.status_code, 401)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -64,7 +64,7 @@ class AppLayerTests(unittest.TestCase):
         save_experiment_config(payload, self.case_root)
 
         self.assertEqual(load_experiment_config(self.case_root), payload)
-        self.assertEqual(load_watchlist_config(self.case_root), {"holdings": []})
+        self.assertEqual(load_watchlist_config(self.case_root), {"holdings": [], "focus_pool": []})
 
     def test_report_repository_loads_latest_symbol_markdown(self) -> None:
         reports_dir = self.case_root / "reports" / "weekly"

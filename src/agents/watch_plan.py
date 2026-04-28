@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -150,9 +151,9 @@ def _compose_watch_plan(snapshot: dict[str, object]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def generate_watch_plans(root: Path | None = None) -> list[Path]:
+def generate_watch_plans(root: Path | None = None, *, user_id: str | None = None) -> list[Path]:
     resolved_root = root or project_root()
-    watchlist = load_watchlist_config(resolved_root, prefer_database=True).get("holdings", []) or []
+    watchlist = load_watchlist_config(resolved_root, prefer_database=True, user_id=user_id).get("holdings", []) or []
     if not watchlist:
         logger.info("No holdings were found in the database watchlist configuration.")
         return []
@@ -185,6 +186,7 @@ def generate_watch_plans(root: Path | None = None) -> list[Path]:
             note_kind="watch_plan",
             plan_date=str(plan_date),
             content=_compose_watch_plan(snapshot),
+            user_id=user_id,
         )
         generated_paths.append(output_path)
         logger.info(f"Generated watch plan: {output_path}")
@@ -193,7 +195,8 @@ def generate_watch_plans(root: Path | None = None) -> list[Path]:
 
 
 def run() -> None:
-    generated_paths = generate_watch_plans()
+    user_id = os.environ.get("OPENLIANGHUA_USER_ID") or None
+    generated_paths = generate_watch_plans(user_id=user_id)
     if not generated_paths:
         print("No watch plans generated.")
         return

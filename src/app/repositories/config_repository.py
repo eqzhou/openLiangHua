@@ -80,28 +80,35 @@ def save_experiment_config(payload: dict[str, Any], root: Path | None = None) ->
     save_yaml_config(resolved_root / "config" / "experiment.yaml", payload)
 
 
-def load_watchlist_config(root: Path | None = None, *, prefer_database: bool = True) -> dict[str, Any]:
+def load_watchlist_config(
+    root: Path | None = None,
+    *,
+    prefer_database: bool = True,
+    user_id: str | None = None,
+) -> dict[str, Any]:
     resolved_root = root or project_root()
     if prefer_database and _uses_primary_project_root(root):
         from src.app.repositories.postgres_watchlist_store import PostgresWatchlistStore
         from src.web_api.settings import get_api_settings
-        
+
         try:
+            resolved_user_id = str(user_id or "system").strip() or "system"
             store = PostgresWatchlistStore(get_api_settings())
-            # We use 'system' as the default user_id for global watchlists for now
-            db_data = store.load_watchlist("system")
-            if not db_data["holdings"] and not db_data["focus_pool"]:
+            db_data = store.load_watchlist(resolved_user_id)
+            if resolved_user_id == "system" and not db_data["holdings"] and not db_data["focus_pool"]:
                 # Seed from YAML if DB is empty
                 yaml_data = load_yaml_config(resolved_root / "config" / "watchlist.yaml", default={"holdings": [], "focus_pool": []})
                 for item in yaml_data.get("holdings", []):
-                    store.add_item("system", item["ts_code"], item.get("name", ""), "holding", cost=item.get("cost"), shares=item.get("shares"))
+                    store.add_item(resolved_user_id, item["ts_code"], item.get("name", ""), "holding", cost=item.get("cost"), shares=item.get("shares"))
                 for item in yaml_data.get("focus_pool", []):
-                    store.add_item("system", item["ts_code"], item.get("name", ""), "focus", note=item.get("note"))
+                    store.add_item(resolved_user_id, item["ts_code"], item.get("name", ""), "focus", note=item.get("note"))
                 return yaml_data
             return db_data
         except Exception as exc:
             import logging
             logging.getLogger("openlianghua.config").error(f"Failed to load watchlist from DB, falling back to YAML: {exc}")
+            if user_id:
+                return {"holdings": [], "focus_pool": []}
             return load_yaml_config(resolved_root / "config" / "watchlist.yaml", default={"holdings": [], "focus_pool": []})
             
     return load_yaml_config(resolved_root / "config" / "watchlist.yaml", default={"holdings": [], "focus_pool": []})

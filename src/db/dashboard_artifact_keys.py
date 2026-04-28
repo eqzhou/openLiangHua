@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 
 def config_artifact_key(name: str) -> str:
     return f"config:{name}"
@@ -13,8 +15,41 @@ def table_artifact_key(data_source: str, name: str) -> str:
     return f"{data_source}:table:{name}"
 
 
+def _user_digest(user_id: str) -> str:
+    return hashlib.sha256(str(user_id or "").strip().encode("utf-8")).hexdigest()[:16]
+
+
+def user_json_artifact_key(data_source: str, name: str, user_id: str | None) -> str:
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        return json_artifact_key(data_source, name)
+    return json_artifact_key(data_source, f"{name}:user:{_user_digest(normalized_user_id)}")
+
+
+def user_table_artifact_key(data_source: str, name: str, user_id: str | None) -> str:
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        return table_artifact_key(data_source, name)
+    return table_artifact_key(data_source, f"{name}:user:{_user_digest(normalized_user_id)}")
+
+
+def user_text_artifact_key(data_source: str, name: str, user_id: str | None) -> str:
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        return text_artifact_key(data_source, name)
+    return text_artifact_key(data_source, f"{name}:user:{_user_digest(normalized_user_id)}")
+
+
 def watchlist_artifact_key(data_source: str) -> str:
     return table_artifact_key(data_source, "watchlist_snapshot")
+
+
+def user_watchlist_artifact_key(data_source: str, user_id: str) -> str:
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        return watchlist_artifact_key(data_source)
+
+    return user_table_artifact_key(data_source, "watchlist_snapshot", normalized_user_id)
 
 
 def candidate_snapshot_artifact_key(data_source: str, model_name: str, split_name: str) -> str:
@@ -61,3 +96,11 @@ def llm_bridge_export_artifact_key(data_source: str, output_prefix: str, name: s
 
 def note_artifact_key(data_source: str, symbol: str, note_kind: str) -> str:
     return f"{data_source}:note:{symbol}:{note_kind}"
+
+
+def user_note_artifact_key(data_source: str, symbol: str, note_kind: str, user_id: str) -> str:
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        return note_artifact_key(data_source, symbol, note_kind)
+    digest = hashlib.sha256(normalized_user_id.encode("utf-8")).hexdigest()[:16]
+    return f"{data_source}:note:user:{digest}:{symbol}:{note_kind}"

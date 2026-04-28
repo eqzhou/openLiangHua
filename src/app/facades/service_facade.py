@@ -149,10 +149,10 @@ def _get_realtime_snapshot_summary() -> dict[str, Any]:
     return _json_ready(summary)
 
 
-def get_shell_payload() -> dict[str, Any]:
+def get_shell_payload(user_id: str | None = None) -> dict[str, Any]:
     from src.app.facades.base import get_bootstrap_payload
     experiment_config = get_experiment_config_payload()
-    watchlist_config = load_watchlist_config()
+    watchlist_config = load_watchlist_config(user_id=user_id)
     return {
         "bootstrap": get_bootstrap_payload(),
         "experimentConfig": experiment_config,
@@ -177,9 +177,9 @@ def get_service_payload() -> dict[str, Any]:
     return payload
 
 
-def refresh_realtime_payload() -> dict[str, Any]:
+def refresh_realtime_payload(user_id: str | None = None) -> dict[str, Any]:
     from src.app.facades.watchlist_facade import _refresh_watchlist_realtime_snapshot
-    realtime_quotes, realtime_status, symbols, _ = _refresh_watchlist_realtime_snapshot()
+    realtime_quotes, realtime_status, symbols, _ = _refresh_watchlist_realtime_snapshot(user_id=user_id)
     return {
         "ok": bool(realtime_status.get("available")) or not symbols,
         "symbolCount": int(len(symbols)),

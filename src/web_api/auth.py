@@ -303,7 +303,7 @@ def set_auth_cookie(response: Response, session_token: str, settings: ApiSetting
         value=session_token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=settings.auth_cookie_secure,
         max_age=settings.auth_session_days * 24 * 60 * 60,
         path="/",
     )
@@ -315,5 +315,5 @@ def clear_auth_cookie(response: Response, settings: ApiSettings) -> None:
         path="/",
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=settings.auth_cookie_secure,
     )
