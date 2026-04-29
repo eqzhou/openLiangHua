@@ -49,6 +49,46 @@ function toErrorMessage(error: unknown): string {
   return '操作失败，请稍后再试。'
 }
 
+function asRecord(value: unknown): JsonRecord {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonRecord) : {}
+}
+
+function asRecordArray(value: unknown): JsonRecord[] {
+  return Array.isArray(value) ? value.filter((item): item is JsonRecord => item !== null && typeof item === 'object' && !Array.isArray(item)) : []
+}
+
+function availabilityTone(available: unknown): 'good' | 'warn' {
+  return available === true ? 'good' : 'warn'
+}
+
+function availabilityLabel(available: unknown): string {
+  return available === true ? '可用' : '不可用'
+}
+
+function healthPortLabel(record: JsonRecord): string {
+  const label = String(record.label ?? '服务')
+  const port = record.port ? `:${String(record.port)}` : ''
+  return `${label}${port} ${availabilityLabel(record.available)}`
+}
+
+function streamlitHealthLabel(streamlitStatus: JsonRecord): string {
+  if (streamlitStatus.listener_present === true || String(streamlitStatus.effective_state ?? '').toLowerCase() === 'running') {
+    return 'Streamlit 回退可用'
+  }
+  return 'Streamlit 回退不可用'
+}
+
+function streamlitHealthTone(streamlitStatus: JsonRecord): 'good' | 'warn' {
+  return streamlitStatus.listener_present === true || String(streamlitStatus.effective_state ?? '').toLowerCase() === 'running' ? 'good' : 'warn'
+}
+
+function pm2HealthLabel(pm2Status: JsonRecord, processCount: number): string {
+  if (pm2Status.available === true) {
+    return `PM2 ${processCount} 个进程`
+  }
+  return String(pm2Status.message ?? 'PM2 不可用')
+}
+
 export function ServicePage({ authenticated = false }: ServicePageProps) {
   const queryClient = useQueryClient()
   const { pushToast } = useToast()
@@ -85,7 +125,13 @@ export function ServicePage({ authenticated = false }: ServicePageProps) {
   const payload = useMemo(() => serviceQuery.data ?? {}, [serviceQuery.data])
   const lastStatus = (payload.last_status as JsonRecord | undefined) ?? {}
   const realtimeSnapshot = (payload.realtime_snapshot as JsonRecord | undefined) ?? {}
-  const statusTone = String(payload.effective_state ?? '').toLowerCase() === 'running' ? 'good' : 'warn'
+  const apiStatus = asRecord(payload.apiStatus)
+  const webStatus = asRecord(payload.webStatus)
+  const pm2Status = asRecord(payload.pm2Status)
+  const pm2Processes = asRecordArray(pm2Status.processes)
+  const streamlitStatus = asRecord(payload.streamlitStatus)
+  const logs = asRecord(payload.logs)
+  const statusTone = streamlitHealthTone(streamlitStatus)
   const serviceStatusLabel = normalizeServiceStatusLabel(payload.status_label_display)
   const serviceStatusHint = serviceStatusDescription(payload.status_label_display)
   const snapshotMode = describeRealtimeSnapshotMode(realtimeSnapshot.snapshot_bucket, realtimeSnapshot.served_from)
@@ -103,17 +149,31 @@ export function ServicePage({ authenticated = false }: ServicePageProps) {
 
   const serviceFieldRows = useMemo(() => {
     const filtered = Object.fromEntries(
-      Object.entries(payload).filter(([field]) => !['out_log_tail', 'err_log_tail', 'last_status', 'realtime_snapshot'].includes(field)),
+      Object.entries(payload).filter(
+        ([field]) =>
+          ![
+            'out_log_tail',
+            'err_log_tail',
+            'last_status',
+            'realtime_snapshot',
+            'streamlitStatus',
+            'apiStatus',
+            'webStatus',
+            'pm2Status',
+            'logs',
+          ].includes(field),
+      ),
     ) as JsonRecord
     return recordToFieldRows(filtered)
   }, [payload])
 
   const serviceHeroBadges = (
     <>
-      <Badge tone={statusTone}>{`服务 ${serviceStatusLabel}`}</Badge>
-      <Badge tone={payload.listener_present ? 'good' : 'warn'}>{payload.listener_present ? '监听正常' : '监听异常'}</Badge>
+      <Badge tone={availabilityTone(apiStatus.available)}>{healthPortLabel(apiStatus)}</Badge>
+      <Badge tone={availabilityTone(webStatus.available)}>{healthPortLabel(webStatus)}</Badge>
+      <Badge tone={pm2Status.available === true ? 'good' : 'warn'}>{pm2HealthLabel(pm2Status, pm2Processes.length)}</Badge>
+      <Badge tone={statusTone}>{streamlitHealthLabel(streamlitStatus)}</Badge>
       <Badge tone={snapshotTone}>{String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}</Badge>
-      <Badge tone="brand">{snapshotSource.label}</Badge>
     </>
   )
 
@@ -125,35 +185,38 @@ export function ServicePage({ authenticated = false }: ServicePageProps) {
       />
 
       <div className="metric-grid metric-grid--four">
-        <MetricCard label="页面进程 PID" value={payload.streamlit_pid ?? '-'} />
-        <MetricCard label="守护进程 PID" value={payload.supervisor_pid ?? '-'} />
-        <MetricCard label="监听端口数" value={(payload.listener_pids as unknown[] | undefined)?.length ?? 0} tone={payload.listener_present ? 'good' : 'warn'} />
-        <MetricCard label="重启次数" value={lastStatus.restart_count ?? '-'} tone={Number(lastStatus.restart_count ?? 0) > 0 ? 'warn' : 'default'} />
+        <MetricCard label="FastAPI" value={availabilityLabel(apiStatus.available)} helper={`端口 ${formatValue(apiStatus.port ?? 8989)}`} tone={availabilityTone(apiStatus.available)} />
+        <MetricCard label="React/Vite" value={availabilityLabel(webStatus.available)} helper={`端口 ${formatValue(webStatus.port ?? 5174)}`} tone={availabilityTone(webStatus.available)} />
+        <MetricCard label="PM2 进程" value={pm2Processes.length} helper={String(pm2Status.message ?? '') || '进程清单只读'} tone={pm2Status.available === true ? 'good' : 'warn'} />
+        <MetricCard
+          label="Streamlit 回退"
+          value={streamlitStatus.listener_present === true ? '监听中' : '未监听'}
+          helper={`端口 8501 / PID ${formatValue(streamlitStatus.streamlit_pid ?? payload.streamlit_pid)}`}
+          tone={streamlitHealthTone(streamlitStatus)}
+        />
       </div>
 
-      <Panel title="状态" tone="warm" className="panel--summary-surface">
+      <Panel title="只读健康大盘" tone="warm" className="panel--summary-surface">
         <QueryNotice isLoading={serviceQuery.isLoading} error={serviceQuery.error} />
         {!authenticated ? <div className="query-notice query-notice--info">当前只读，可查看最近快照；如需刷新行情，请先登录。</div> : null}
         {serviceStatusHint ? <div className="query-notice query-notice--info">{serviceStatusHint}</div> : null}
 
         <SectionBlock title="运行结论">
           <SpotlightCard
-            title={serviceStatusLabel}
-            meta="前端服务状态"
-            subtitle={`最近更新时间 ${formatDateTime(lastStatus.last_update)}，快照状态 ${String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}。`}
+            title="React + FastAPI 运维视图"
+            meta="只读"
+            subtitle={`最近状态更新时间 ${formatDateTime(lastStatus.last_update)}，快照状态 ${String(realtimeSnapshot.snapshot_label_display ?? '暂无快照')}。`}
             badges={[
-              { label: `服务 ${serviceStatusLabel}`, tone: statusTone },
-              { label: payload.listener_present ? '8501 正常' : '8501 异常', tone: payload.listener_present ? 'good' : 'warn' },
+              { label: healthPortLabel(apiStatus), tone: availabilityTone(apiStatus.available) },
+              { label: healthPortLabel(webStatus), tone: availabilityTone(webStatus.available) },
+              { label: pm2HealthLabel(pm2Status, pm2Processes.length), tone: pm2Status.available === true ? 'good' : 'warn' },
+              { label: streamlitHealthLabel(streamlitStatus), tone: streamlitHealthTone(streamlitStatus) },
               { label: String(realtimeSnapshot.snapshot_label_display ?? '暂无快照'), tone: snapshotTone },
-              {
-                label: payload.listener_matches_streamlit_pid ? '进程一致' : '进程异常',
-                tone: payload.listener_matches_streamlit_pid ? 'good' : 'warn',
-              },
             ]}
             metrics={[
-              { label: '页面进程 PID', value: payload.streamlit_pid ?? '-' },
-              { label: '守护进程 PID', value: payload.supervisor_pid ?? '-' },
-              { label: '监听端口数', value: (payload.listener_pids as unknown[] | undefined)?.length ?? 0 },
+              { label: 'API 端口', value: apiStatus.port ?? 8989, tone: availabilityTone(apiStatus.available) },
+              { label: 'Web 端口', value: webStatus.port ?? 5174, tone: availabilityTone(webStatus.available) },
+              { label: 'PM2 进程数', value: pm2Processes.length, tone: pm2Status.available === true ? 'good' : 'warn' },
               { label: '重启次数', value: lastStatus.restart_count ?? '-', tone: Number(lastStatus.restart_count ?? 0) > 0 ? 'warn' : 'default' },
             ]}
           />
@@ -209,18 +272,31 @@ export function ServicePage({ authenticated = false }: ServicePageProps) {
         </SupportPanel>
 
         <SupportPanel title="运行">
-          <SectionBlock title="健康检查概览" tone="muted" collapsible defaultExpanded={false}>
+          <SectionBlock title="端口与回退服务" tone="muted" collapsible defaultExpanded={false}>
             <PropertyGrid
               items={[
-                { label: '守护进程状态', value: formatValue(payload.supervisor_running) },
-                { label: '页面进程状态', value: formatValue(payload.streamlit_running) },
-                { label: '监听端口', value: formatValue(payload.listener_pids), span: 'double' },
-                { label: '状态文件陈旧', value: formatValue(payload.stale_status), tone: payload.stale_status ? 'warn' : 'good' },
-                { label: '守护 PID 陈旧', value: formatValue(payload.stale_supervisor_pid), tone: payload.stale_supervisor_pid ? 'warn' : 'good' },
-                { label: '页面 PID 陈旧', value: formatValue(payload.stale_streamlit_pid), tone: payload.stale_streamlit_pid ? 'warn' : 'good' },
-                { label: '服务状态', value: formatValue(lastStatus.state) },
+                { label: 'FastAPI', value: healthPortLabel(apiStatus), tone: availabilityTone(apiStatus.available) },
+                { label: 'React/Vite', value: healthPortLabel(webStatus), tone: availabilityTone(webStatus.available) },
+                { label: 'Streamlit 状态', value: serviceStatusLabel, tone: streamlitHealthTone(streamlitStatus) },
+                { label: 'Streamlit 监听', value: formatValue(streamlitStatus.listener_pids ?? payload.listener_pids), span: 'double', tone: streamlitHealthTone(streamlitStatus) },
+                { label: '守护进程状态', value: formatValue(streamlitStatus.supervisor_running ?? payload.supervisor_running) },
+                { label: '页面进程状态', value: formatValue(streamlitStatus.streamlit_running ?? payload.streamlit_running) },
+                {
+                  label: '状态文件陈旧',
+                  value: formatValue(streamlitStatus.stale_status ?? payload.stale_status),
+                  tone: (streamlitStatus.stale_status ?? payload.stale_status) ? 'warn' : 'good',
+                },
                 { label: '最近更新时间', value: formatDateTime(lastStatus.last_update) },
               ]}
+            />
+          </SectionBlock>
+          <SectionBlock title="PM2 进程" tone="muted" collapsible defaultExpanded={false}>
+            <DataTable
+              rows={pm2Processes}
+              columns={['name', 'status', 'pid', 'restartTime', 'uptime']}
+              storageKey="service-pm2-processes"
+              emptyText={String(pm2Status.message ?? '当前环境未返回 PM2 进程。')}
+              density="compact"
             />
           </SectionBlock>
         </SupportPanel>
@@ -228,11 +304,17 @@ export function ServicePage({ authenticated = false }: ServicePageProps) {
 
       <SupportPanel title="日志">
         <div className="split-layout">
-          <SectionBlock title="标准输出" tone="muted" collapsible defaultExpanded={false}>
-            <pre className="log-block">{String(payload.out_log_tail ?? '') || '暂无日志'}</pre>
+          <SectionBlock title="FastAPI" tone="muted" collapsible defaultExpanded={false}>
+            <pre className="log-block">{String(logs.api ?? '') || '暂无 API 日志'}</pre>
           </SectionBlock>
-          <SectionBlock title="错误输出" tone="muted" collapsible defaultExpanded={false}>
-            <pre className="log-block">{String(payload.err_log_tail ?? '') || '暂无日志'}</pre>
+          <SectionBlock title="React/Vite" tone="muted" collapsible defaultExpanded={false}>
+            <pre className="log-block">{String(logs.web ?? '') || '暂无 Web 日志'}</pre>
+          </SectionBlock>
+          <SectionBlock title="Streamlit 标准输出" tone="muted" collapsible defaultExpanded={false}>
+            <pre className="log-block">{String(logs.streamlitOut ?? payload.out_log_tail ?? '') || '暂无日志'}</pre>
+          </SectionBlock>
+          <SectionBlock title="Streamlit 错误输出" tone="muted" collapsible defaultExpanded={false}>
+            <pre className="log-block">{String(logs.streamlitErr ?? payload.err_log_tail ?? '') || '暂无日志'}</pre>
           </SectionBlock>
         </div>
       </SupportPanel>

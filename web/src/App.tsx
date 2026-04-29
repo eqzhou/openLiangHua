@@ -105,6 +105,24 @@ function DashboardApp() {
     },
   })
 
+  const changePasswordMutation = useMutation({
+    mutationFn: (payload: { oldPassword: string; newPassword: string }) => apiPost<{ ok: boolean }>('/api/auth/change-password', payload),
+    onSuccess: () => {
+      pushToast({
+        tone: 'success',
+        title: '密码已更新',
+        description: '新的管理员密码已经生效。',
+      })
+    },
+    onError: (error) => {
+      pushToast({
+        tone: 'error',
+        title: '密码修改失败',
+        description: toErrorMessage(error),
+      })
+    },
+  })
+
   const saveConfigMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => apiPut<Record<string, unknown>>('/api/config/experiment', payload),
     onSuccess: () => {
@@ -219,6 +237,7 @@ function DashboardApp() {
       logoutPending={logoutMutation.isPending}
       onLogin={(payload) => loginMutation.mutateAsync(payload).then(() => undefined)}
       onLogout={() => logoutMutation.mutateAsync().then(() => undefined)}
+      onChangePassword={(payload) => changePasswordMutation.mutateAsync(payload).then(() => undefined)}
     >
       <Suspense fallback={<div className="empty-state">页面加载中...</div>}>
         <Routes>

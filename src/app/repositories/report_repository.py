@@ -357,6 +357,20 @@ def _write_json_variants(reports_dir: Path, filename: str, data_source: str, pay
     return source_path
 
 
+def _frame_metadata(frame: pd.DataFrame) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "rows": int(len(frame)),
+        "columns": list(frame.columns),
+    }
+    if "ts_code" in frame.columns:
+        metadata["symbol_count"] = int(frame["ts_code"].nunique())
+    if "trade_date" in frame.columns:
+        trade_dates = pd.to_datetime(frame["trade_date"], errors="coerce")
+        latest_trade_date = trade_dates.max()
+        metadata["latest_trade_date"] = None if pd.isna(latest_trade_date) else latest_trade_date.date().isoformat()
+    return metadata
+
+
 def save_binary_dataset(
     root: Path | None = None,
     *,
@@ -380,10 +394,9 @@ def save_binary_dataset(
             artifact_kind="parquet",
             content=source_path.read_bytes(),
             metadata={
+                **_frame_metadata(frame),
                 "artifact_name": artifact_name,
                 "source_path": str(source_path),
-                "rows": int(len(frame)),
-                "columns": list(frame.columns),
             },
         )
         return source_path
@@ -396,9 +409,8 @@ def save_binary_dataset(
         artifact_kind="parquet",
         content=content,
         metadata={
+            **_frame_metadata(frame),
             "artifact_name": artifact_name,
-            "rows": int(len(frame)),
-            "columns": list(frame.columns),
             "directory": directory,
             "filename": filename,
             "write_canonical": bool(write_canonical),

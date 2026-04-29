@@ -7,7 +7,7 @@ import { useToast } from '../components/ToastProvider'
 import { dataManagementClient } from '../facades/dashboardPageClient'
 import { formatValue } from '../lib/format'
 import { DATA_MANAGEMENT_REFETCH_INTERVAL_MS } from '../lib/polling'
-import type { ActionResult, DataManagementPayload } from '../types/api'
+import type { ActionResult, DataManagementPayload, MyquantStatusPayload } from '../types/api'
 
 interface DataManagementPageProps {
   authenticated?: boolean
@@ -29,6 +29,12 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
   const dataQuery = useQuery({
     queryKey: dataManagementClient.queryKey(),
     queryFn: () => apiGet<DataManagementPayload>(dataManagementClient.path()),
+    refetchInterval: DATA_MANAGEMENT_REFETCH_INTERVAL_MS,
+  })
+
+  const myquantStatusQuery = useQuery({
+    queryKey: dataManagementClient.myquantStatusQueryKey(),
+    queryFn: () => apiGet<MyquantStatusPayload>(dataManagementClient.myquantStatusPath()),
     refetchInterval: DATA_MANAGEMENT_REFETCH_INTERVAL_MS,
   })
 
@@ -129,7 +135,43 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
     },
   })
 
+  const myquantDownloadMutation = useMutation({
+    mutationFn: () =>
+      apiPost<ActionResult>(dataManagementClient.myquantDownloadActionPath(), {
+        target_source: 'myquant',
+        end_date: endDate || undefined,
+      }),
+    onSuccess: (actionPayload) => {
+      setLatestAction(actionPayload)
+      void queryClient.invalidateQueries()
+      pushToast({ tone: actionPayload.ok ? 'success' : 'error', title: actionPayload.label ?? 'MyQuant 下载', description: actionPayload.output })
+    },
+    onError: (error) => pushToast({ tone: 'error', title: 'MyQuant 下载失败', description: toErrorMessage(error) }),
+  })
+
+  const myquantEnrichMutation = useMutation({
+    mutationFn: () => apiPost<ActionResult>(dataManagementClient.myquantEnrichActionPath(), { target_source: 'myquant' }),
+    onSuccess: (actionPayload) => {
+      setLatestAction(actionPayload)
+      void queryClient.invalidateQueries()
+      pushToast({ tone: actionPayload.ok ? 'success' : 'error', title: actionPayload.label ?? 'MyQuant 清洗增强', description: actionPayload.output })
+    },
+    onError: (error) => pushToast({ tone: 'error', title: 'MyQuant 清洗增强失败', description: toErrorMessage(error) }),
+  })
+
+  const myquantResearchMutation = useMutation({
+    mutationFn: () => apiPost<ActionResult>(dataManagementClient.myquantResearchActionPath(), { target_source: 'myquant' }),
+    onSuccess: (actionPayload) => {
+      setLatestAction(actionPayload)
+      void queryClient.invalidateQueries()
+      pushToast({ tone: actionPayload.ok ? 'success' : 'error', title: actionPayload.label ?? 'MyQuant 研究刷新', description: actionPayload.output })
+    },
+    onError: (error) => pushToast({ tone: 'error', title: 'MyQuant 研究刷新失败', description: toErrorMessage(error) }),
+  })
+
   const dailyBar = payload?.dailyBar ?? { exists: false, rowCount: 0, symbolCount: 0 }
+  const myquantStatus = myquantStatusQuery.data
+  const myquantDailyBar = myquantStatus?.dailyBar ?? { exists: false, rowCount: 0, symbolCount: 0 }
   const researchPanel = payload?.researchPanel ?? { exists: false, rowCount: 0, symbolCount: 0 }
   const legacyFeatureView = payload?.legacyFeatureView ?? { exists: false, rowCount: 0, symbolCount: 0 }
   const datasetSummary = (payload?.datasetSummary ?? {}) as Record<string, unknown>
@@ -146,7 +188,18 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
       ? 'research'
       : incrementalRefreshMutation.isPending
         ? 'incremental'
-        : fullRefreshMutation.isPending ? 'full' : null
+        : fullRefreshMutation.isPending
+          ? 'full'
+          : myquantDownloadMutation.isPending
+            ? 'myquant-download'
+            : myquantEnrichMutation.isPending
+              ? 'myquant-enrich'
+              : myquantResearchMutation.isPending ? 'myquant-research' : null
+  const myquantTokenConfigured = myquantStatus?.tokenConfigured ?? null
+  const myquantReady = myquantTokenConfigured === true && myquantStatus?.sdkAvailable === true
+  const showMyquantTokenWarning = authenticated && myquantTokenConfigured === false
+  const showMyquantSdkWarning = authenticated && myquantTokenConfigured === true && myquantStatus?.sdkAvailable === false
+  const showWarningBanners = !authenticated || tokenConfigured === false || sourceMismatch || showMyquantTokenWarning || showMyquantSdkWarning
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden text-erp bg-erp-bg">
@@ -215,11 +268,13 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
         </div>
 
         {/* Warning Banners */}
-        {(!authenticated || tokenConfigured === false || sourceMismatch) && (
+        {showWarningBanners && (
           <div className="flex flex-col gap-2 shrink-0">
             {!authenticated && <div className="p-3 bg-blue-50/20 border border-blue-100 rounded text-blue-600 text-sm flex items-center gap-2"><i className="ph-fill ph-info"></i> 当前只读，可查看数据状态；如需执行刷新，请先登录系统。</div>}
             {authenticated && tokenConfigured === false && <div className="p-3 bg-red-50/20 border border-red-100 rounded text-erp-danger text-sm flex items-center gap-2"><i className="ph-fill ph-warning"></i> 当前未检测到 TUSHARE_TOKEN，请先更新 .env 配置文件或设置环境变量。</div>}
             {sourceMismatch && <div className="p-3 bg-yellow-50/20 border border-yellow-100 rounded text-yellow-700 text-sm flex items-center gap-2"><i className="ph-fill ph-warning"></i> 当前实际落地数据源为 {actualSource}，但配置文件仍指向 {configuredSource}。系统已优先读取真实落地产物。</div>}
+            {showMyquantTokenWarning && <div className="p-3 bg-yellow-50/20 border border-yellow-100 rounded text-yellow-700 text-sm flex items-center gap-2"><i className="ph-fill ph-warning"></i> MyQuant Token 未配置，MyQuant Web 刷新入口将保持禁用。</div>}
+            {showMyquantSdkWarning && <div className="p-3 bg-yellow-50/20 border border-yellow-100 rounded text-yellow-700 text-sm flex items-center gap-2"><i className="ph-fill ph-warning"></i> 当前环境未检测到 gm SDK，请先安装 MyQuant 官方 SDK。</div>}
           </div>
         )}
 
@@ -276,6 +331,48 @@ export function DataManagementPage({ authenticated = false }: DataManagementPage
                          onClick={() => fullRefreshMutation.mutate()}
                        >
                          {pendingAction === 'full' ? <><i className="ph ph-spinner animate-spin"></i> 全流程刷新中...</> : <><i className="ph ph-database"></i> Tushare 全流程重建 (Full Pipeline)</>}
+                       </button>
+                    </div>
+
+                    <div className="flex flex-col gap-3 pt-6 border-t erp-border">
+                       <div className="text-gray-500 font-bold uppercase text-[10px] tracking-wider">MyQuant 手动刷新</div>
+                       <div className="grid grid-cols-2 gap-2 text-[11px]">
+                         <div className="erp-border rounded p-2 bg-gray-50">
+                           <div className="text-gray-400">Token</div>
+                           <div className="font-bold">{myquantTokenConfigured === null ? '登录后可见' : myquantTokenConfigured ? '已配置' : '未配置'}</div>
+                         </div>
+                         <div className="erp-border rounded p-2 bg-gray-50">
+                           <div className="text-gray-400">gm SDK</div>
+                           <div className="font-bold">{myquantStatus?.sdkAvailable ? '可用' : '不可用'}</div>
+                         </div>
+                         <div className="erp-border rounded p-2 bg-gray-50 col-span-2">
+                           <div className="text-gray-400">MyQuant 日线</div>
+                           <div className="font-bold">{myquantDailyBar.latestTradeDate ?? '-'} / {formatValue(myquantDailyBar.symbolCount ?? 0)} 只 / {formatValue(myquantDailyBar.rowCount ?? 0)} 行</div>
+                         </div>
+                       </div>
+                       <button
+                         type="button"
+                         className={`w-full h-9 flex items-center justify-center gap-2 rounded font-bold transition-all shadow-sm ${!authenticated || !myquantReady || pendingAction !== null ? 'bg-gray-100 text-gray-400 cursor-not-allowed erp-border' : 'bg-white erp-border hover:bg-gray-50 active:scale-[0.98] text-gray-700'}`}
+                         disabled={!authenticated || !myquantReady || pendingAction !== null}
+                         onClick={() => myquantDownloadMutation.mutate()}
+                       >
+                         {pendingAction === 'myquant-download' ? <><i className="ph ph-spinner animate-spin"></i> 下载中...</> : <><i className="ph ph-cloud-arrow-down"></i> 下载 MyQuant 数据</>}
+                       </button>
+                       <button
+                         type="button"
+                         className={`w-full h-9 flex items-center justify-center gap-2 rounded font-bold transition-all shadow-sm ${!authenticated || pendingAction !== null ? 'bg-gray-100 text-gray-400 cursor-not-allowed erp-border' : 'bg-white erp-border hover:bg-gray-50 active:scale-[0.98] text-gray-700'}`}
+                         disabled={!authenticated || pendingAction !== null}
+                         onClick={() => myquantEnrichMutation.mutate()}
+                       >
+                         {pendingAction === 'myquant-enrich' ? <><i className="ph ph-spinner animate-spin"></i> 清洗中...</> : <><i className="ph ph-funnel"></i> 清洗增强 MyQuant 面板</>}
+                       </button>
+                       <button
+                         type="button"
+                         className={`w-full h-9 flex items-center justify-center gap-2 rounded font-bold transition-all shadow-sm ${!authenticated || pendingAction !== null ? 'bg-gray-100 text-gray-400 cursor-not-allowed erp-border' : 'bg-white erp-border hover:bg-gray-50 active:scale-[0.98] text-gray-700'}`}
+                         disabled={!authenticated || pendingAction !== null}
+                         onClick={() => myquantResearchMutation.mutate()}
+                       >
+                         {pendingAction === 'myquant-research' ? <><i className="ph ph-spinner animate-spin"></i> 重建中...</> : <><i className="ph ph-chart-scatter"></i> 重建 MyQuant 研究面板</>}
                        </button>
                     </div>
                  </div>

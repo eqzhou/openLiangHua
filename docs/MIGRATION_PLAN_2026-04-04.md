@@ -162,7 +162,7 @@ Make React the clear primary operator experience.
 
 ## Phase 3: Repository / Database Consolidation
 
-Status: `planned`
+Status: `in progress`
 
 ### Objective
 
@@ -181,9 +181,17 @@ Reduce mixed file/database reads by formalizing storage ownership.
 - operational data has clear repository ownership
 - storage backend can evolve without breaking UI contracts
 
+### 2026-04-29 Progress Update
+
+- data-management actions now route through FastAPI facade helpers instead of adding page-layer direct script/file access
+- MyQuant status/manual task payloads are exposed as explicit API contracts while keeping full parameter matrices out of the UI
+- service health payload assembly is centralized in `service_facade`, including API/Web port checks, PM2 summaries, Streamlit fallback status, and recent logs
+- watchlist Web maintenance is treated as a supported per-user API workflow; `ts_code + type` remains the immutable item identity
+- research/data UI direction remains repository/facade-first; file reads stay as compatibility fallback and should not be newly introduced in React pages
+
 ## Phase 4: Legacy Streamlit Reduction
 
-Status: `planned`
+Status: `in progress`
 
 ### Objective
 
@@ -200,6 +208,13 @@ Shrink Streamlit to a fallback and maintenance surface.
 - Streamlit is not the main operator surface
 - Streamlit depends on shared facades/services rather than private logic
 - React is the daily-entry UI
+
+### 2026-04-29 Progress Update
+
+- Streamlit is documented as fallback/inspection only, not the product-growth surface
+- React data-management now owns the supported Tushare refresh and optional MyQuant manual task entrypoints
+- React service page now presents the read-only operational health dashboard; no Web start/stop/restart controls are added
+- remaining duplicate business assembly should continue moving behind facades/services before any Streamlit parity cleanup
 
 ## Working Rules
 

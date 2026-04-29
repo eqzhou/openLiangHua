@@ -98,9 +98,14 @@ def _score_snapshot(
     return scored
 
 
-def generate_latest_inference(root: Path | None = None, *, user_id: str | None = None) -> dict[str, object]:
+def generate_latest_inference(
+    root: Path | None = None,
+    *,
+    user_id: str | None = None,
+    data_source: str | None = None,
+) -> dict[str, object]:
     resolved_root = root or project_root()
-    workspace = resolve_model_workspace(resolved_root)
+    workspace = resolve_model_workspace(resolved_root, data_source=data_source)
     data_source = workspace.data_source
     reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
 

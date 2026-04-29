@@ -14,6 +14,7 @@ interface AppLayoutProps {
   logoutPending?: boolean
   onLogin: (payload: { username: string; password: string }) => Promise<void>
   onLogout: () => Promise<void> | void
+  onChangePassword: (payload: { oldPassword: string; newPassword: string }) => Promise<void>
 }
 
 const navSections = [
@@ -55,6 +56,7 @@ export function AppLayout({
   logoutPending = false,
   onLogin,
   onLogout,
+  onChangePassword,
 }: AppLayoutProps) {
   const location = useLocation()
   const [treeOpen, setTreeOpen] = useState<Record<string, boolean>>({
@@ -65,6 +67,10 @@ export function AppLayout({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [loginDialogOpen, setLoginDialogOpen] = useState(false)
   const [loginDialogVersion, setLoginDialogVersion] = useState(0)
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [changingPassword, setChangingPassword] = useState(false)
 
   const { theme, toggleTheme } = useTheme()
   const user = authSession?.user ?? null
@@ -123,6 +129,13 @@ export function AppLayout({
                 <i className="ph ph-user-circle text-[22px] opacity-80 group-hover:text-erp-primary transition-colors"></i>
                 <span className="font-bold text-erp-header-text/90 hidden md:inline">{user.displayName || user.username}</span>
               </div>
+              <button
+                className="text-white hover:text-erp-primary font-bold cursor-pointer disabled:opacity-50 transition-colors text-[12px] bg-white/10 hover:bg-erp-primary/20 border border-white/10 px-3 py-1 rounded"
+                onClick={() => setPasswordDialogOpen(true)}
+                disabled={logoutPending || changingPassword}
+              >
+                修改密码
+              </button>
               <button
                 className="text-white hover:text-erp-danger font-bold cursor-pointer disabled:opacity-50 transition-colors text-[12px] bg-white/10 hover:bg-erp-danger/20 border border-white/10 px-3 py-1 rounded"
                 onClick={() => onLogout()}
@@ -231,7 +244,7 @@ export function AppLayout({
         <div className="flex items-center gap-1.5">
           <span className="opacity-60 uppercase tracking-tighter">Gateway:</span> 
           <span className="text-erp-success flex items-center gap-1 font-bold">
-             <i className="ph-fill ph-check-circle"></i> CTP_LIVE_NODE
+             <i className="ph-fill ph-check-circle"></i> API_NODE
           </span>
         </div>
         
@@ -251,6 +264,61 @@ export function AppLayout({
           setLoginDialogOpen(false)
         }}
       />
+      {passwordDialogOpen ? (
+        <>
+          <div className="modal-backdrop" onClick={() => (!changingPassword ? setPasswordDialogOpen(false) : undefined)} aria-hidden="true" />
+          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="change-password-title">
+            <div className="modal-card__header">
+              <div>
+                <h2 id="change-password-title" className="modal-card__title">修改密码</h2>
+                <p className="modal-card__subtitle">新密码至少 8 位，并同时包含字母和数字。</p>
+              </div>
+              <button type="button" className="modal-card__close" onClick={() => setPasswordDialogOpen(false)} disabled={changingPassword} aria-label="关闭修改密码窗口">
+                ×
+              </button>
+            </div>
+            <form
+              className="modal-card__body"
+              onSubmit={async (event) => {
+                event.preventDefault()
+                if (changingPassword || !oldPassword || !newPassword) {
+                  return
+                }
+                setChangingPassword(true)
+                try {
+                  await onChangePassword({ oldPassword, newPassword })
+                  setOldPassword('')
+                  setNewPassword('')
+                  setPasswordDialogOpen(false)
+                } finally {
+                  setChangingPassword(false)
+                }
+              }}
+            >
+              <label className="control-field">
+                <span className="control-field__label">当前密码</span>
+                <div className="control-field__control">
+                  <input type="password" value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} autoComplete="current-password" />
+                </div>
+              </label>
+              <label className="control-field">
+                <span className="control-field__label">新密码</span>
+                <div className="control-field__control">
+                  <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" />
+                </div>
+              </label>
+              <div className="modal-card__actions">
+                <button type="button" className="button button--ghost" onClick={() => setPasswordDialogOpen(false)} disabled={changingPassword}>
+                  取消
+                </button>
+                <button type="submit" className="button button--primary" disabled={!oldPassword || !newPassword || changingPassword}>
+                  {changingPassword ? '保存中...' : '保存新密码'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      ) : null}
     </div>
   )
 }

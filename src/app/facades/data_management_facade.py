@@ -5,13 +5,16 @@ from typing import Any
 from src.app.facades.base import (
     _json_ready, 
 )
+from src.app.repositories.config_repository import load_experiment_config
 from src.app.services.data_management_service import build_data_management_payload
+from src.app.services.data_management_service import build_myquant_status_payload
 from src.app.services.dashboard_data_service import ROOT
 from src.utils.data_source import active_data_source
 from src.data.market_bars_tushare_sync import sync_market_bars_from_tushare
 from src.data.tushare_workflows import run_tushare_full_refresh, run_tushare_incremental_refresh
 from src.features.build_feature_panel import build_feature_label_artifacts
 from src.agents.overlay_inference_report import generate_overlay_inference_report
+import pandas as pd
 
 
 def get_data_management_payload(*, include_sensitive: bool = True) -> dict[str, Any]:
@@ -24,6 +27,10 @@ def get_data_management_payload(*, include_sensitive: bool = True) -> dict[str, 
     )
 
 
+def get_myquant_status_payload(*, include_sensitive: bool = True) -> dict[str, Any]:
+    return _json_ready(build_myquant_status_payload(root=ROOT, include_sensitive=include_sensitive))
+
+
 def _validate_tushare_target_source(target_source: str) -> str:
     normalized = str(target_source or "akshare").strip().lower() or "akshare"
     if normalized not in {"akshare", "tushare"}:
@@ -34,6 +41,15 @@ def _validate_tushare_target_source(target_source: str) -> str:
 def _format_refresh_output(title: str, lines: list[str]) -> str:
     rendered_lines = [title, *[line for line in lines if line]]
     return "\n".join(rendered_lines).strip()
+
+
+def _action_error_payload(action_name: str, label: str, exc: Exception) -> dict[str, Any]:
+    return {
+        "actionName": action_name,
+        "label": label,
+        "ok": False,
+        "output": f"任务执行失败：{exc.__class__.__name__}。请查看服务端日志确认原因。",
+    }
 
 
 def run_tushare_incremental_refresh_payload(*, target_source: str | None = None, end_date: str | None = None) -> dict[str, Any]:
@@ -138,4 +154,109 @@ def run_watchlist_research_refresh_payload(*, user_id: str, target_source: str |
         "label": "重建研究面板与最新推理",
         "ok": True,
         "output": output,
+    }
+
+
+def run_myquant_download_payload(*, user_id: str, end_date: str | None = None) -> dict[str, Any]:
+    from src.app.facades.base import clear_dashboard_caches
+    from src.data.myquant_downloader import run as run_myquant_download
+    from src.db.dashboard_sync import sync_dataset_summary_artifact, sync_watchlist_snapshot_artifact
+
+    label = "MyQuant 下载"
+    experiment = load_experiment_config(ROOT, prefer_database=True)
+    start_date = str(experiment.get("train_start", "2018-01-01"))
+    resolved_end_date = str(end_date or pd.Timestamp.now(tz="Asia/Shanghai").date().isoformat())
+    try:
+        run_myquant_download(
+            start_date=start_date,
+            end_date=resolved_end_date,
+            chunk_size=10,
+            write_canonical=active_data_source() == "myquant",
+        )
+        dataset_summary = sync_dataset_summary_artifact(root=ROOT, data_source="myquant")
+        watchlist_summary = sync_watchlist_snapshot_artifact(root=ROOT, data_source="myquant", user_id=user_id)
+        clear_dashboard_caches()
+    except Exception as exc:
+        clear_dashboard_caches()
+        return _action_error_payload("myquant_download", label, exc)
+
+    return {
+        "actionName": "myquant_download",
+        "label": label,
+        "ok": True,
+        "output": _format_refresh_output(
+            "MyQuant 下载完成",
+            [
+                f"起始日期：{start_date}",
+                f"截止日期：{resolved_end_date}",
+                f"数据摘要：{dataset_summary.message}",
+                f"观察池快照：{watchlist_summary.message}",
+            ],
+        ),
+    }
+
+
+def run_myquant_enrich_payload(*, user_id: str) -> dict[str, Any]:
+    from src.app.facades.base import clear_dashboard_caches
+    from src.data.myquant_enrich import run as run_myquant_enrich
+    from src.db.dashboard_sync import sync_dataset_summary_artifact, sync_watchlist_snapshot_artifact
+
+    label = "MyQuant 清洗增强"
+    try:
+        run_myquant_enrich(write_canonical=active_data_source() == "myquant")
+        dataset_summary = sync_dataset_summary_artifact(root=ROOT, data_source="myquant")
+        watchlist_summary = sync_watchlist_snapshot_artifact(root=ROOT, data_source="myquant", user_id=user_id)
+        clear_dashboard_caches()
+    except Exception as exc:
+        clear_dashboard_caches()
+        return _action_error_payload("myquant_enrich", label, exc)
+
+    return {
+        "actionName": "myquant_enrich",
+        "label": label,
+        "ok": True,
+        "output": _format_refresh_output(
+            "MyQuant 清洗增强完成",
+            [
+                f"数据摘要：{dataset_summary.message}",
+                f"观察池快照：{watchlist_summary.message}",
+            ],
+        ),
+    }
+
+
+def run_myquant_research_refresh_payload(*, user_id: str) -> dict[str, Any]:
+    from src.app.facades.base import clear_dashboard_caches
+
+    label = "MyQuant 研究面板刷新"
+    try:
+        feature_summary = build_feature_label_artifacts(
+            root=ROOT,
+            data_source="myquant",
+            prefer_source_daily_bar=True,
+        )
+        inference_packet = generate_overlay_inference_report(
+            root=ROOT,
+            execute_llm=False,
+            user_id=user_id,
+            data_source="myquant",
+        )
+        clear_dashboard_caches()
+    except Exception as exc:
+        clear_dashboard_caches()
+        return _action_error_payload("myquant_research_refresh", label, exc)
+
+    return {
+        "actionName": "myquant_research_refresh",
+        "label": label,
+        "ok": True,
+        "output": _format_refresh_output(
+            "MyQuant 研究面板与最新推理刷新完成",
+            [
+                f"研究面板最新日期：{feature_summary.get('date_max', '-')}",
+                f"研究面板行数：{feature_summary.get('panel_rows', feature_summary.get('feature_rows', 0))}",
+                f"最新推理日期：{inference_packet.get('latest_feature_date', '-')}",
+                f"AI候选数量：{inference_packet.get('candidate_count', 0)}",
+            ],
+        ),
     }

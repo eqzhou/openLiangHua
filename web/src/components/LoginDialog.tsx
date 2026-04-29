@@ -40,9 +40,7 @@ export function LoginDialog({ open, pending = false, onClose, onSubmit }: LoginD
               登录
             </h2>
             <p className="modal-card__subtitle">使用工作台账号登录，写操作会通过数据库会话做鉴权。</p>
-            <p className="modal-card__subtitle">
-              本地开发默认用户名是 <code>admin</code>；密码如果不确定，请查看根目录 <code>.env</code> 里的 <code>APP_BOOTSTRAP_PASSWORD</code>。
-            </p>
+            <p className="modal-card__subtitle">如需重置初始管理员凭据，请通过服务端环境配置或管理员初始化流程处理。</p>
           </div>
           <button type="button" className="modal-card__close" onClick={onClose} aria-label="关闭登录窗口" disabled={pending}>
             ×

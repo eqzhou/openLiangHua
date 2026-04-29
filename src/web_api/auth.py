@@ -50,6 +50,8 @@ class AuthStore(Protocol):
 
     def logout(self, session_token: str | None) -> None: ...
 
+    def change_password(self, user_id: str, old_password: str, new_password: str) -> bool: ...
+
 
 def _hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]:
     salt = bytes.fromhex(salt_hex) if salt_hex else secrets.token_bytes(16)
@@ -105,14 +107,7 @@ class PostgresAuthStore:
                         updated_at
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, TRUE, NOW(), NOW())
-                    ON CONFLICT (username) DO UPDATE
-                    SET
-                        password_salt = EXCLUDED.password_salt,
-                        password_hash = EXCLUDED.password_hash,
-                        display_name = EXCLUDED.display_name,
-                        title = EXCLUDED.title,
-                        is_active = TRUE,
-                        updated_at = NOW()
+                    ON CONFLICT (username) DO NOTHING
                     """,
                     (
                         "bootstrap-admin",
@@ -126,6 +121,9 @@ class PostgresAuthStore:
             conn.commit()
 
         self._schema_ready = True
+
+    def hash_password_for_test(self, password: str) -> tuple[str, str]:
+        return _hash_password(password)
 
     def _cleanup_expired_sessions(self, conn: psycopg.Connection) -> None:
         with conn.cursor() as cur:
@@ -249,6 +247,49 @@ class PostgresAuthStore:
                     (_hash_session_token(session_token),),
                 )
             conn.commit()
+
+    def change_password(self, user_id: str, old_password: str, new_password: str) -> bool:
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id or not old_password or not new_password:
+            return False
+
+        self._ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT password_salt, password_hash
+                    FROM app_users
+                    WHERE id = %s AND is_active = TRUE
+                    """,
+                    (normalized_user_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    conn.commit()
+                    return False
+
+                if not _verify_password(
+                    old_password,
+                    salt_hex=str(row["password_salt"]),
+                    digest_hex=str(row["password_hash"]),
+                ):
+                    conn.commit()
+                    return False
+
+                new_salt, new_hash = _hash_password(new_password)
+                cur.execute(
+                    """
+                    UPDATE app_users
+                    SET password_salt = %s,
+                        password_hash = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (new_salt, new_hash, normalized_user_id),
+                )
+            conn.commit()
+        return True
 
 
 @lru_cache(maxsize=1)

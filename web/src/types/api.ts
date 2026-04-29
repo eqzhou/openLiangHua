@@ -151,6 +151,20 @@ export interface DataManagementPayload {
   }
 }
 
+export interface MyquantStatusPayload {
+  targetSource: string
+  envFileExists: boolean
+  tokenConfigured?: boolean | null
+  sdkAvailable: boolean
+  dailyBar: DataArtifactStatus
+  qualityReportExists?: boolean
+  scripts: {
+    download: string
+    enrich: string
+    researchRefresh: string
+  }
+}
+
 export interface OverviewPayload {
   summary: JsonRecord
   comparison: JsonRecord[]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import importlib.util
 from pathlib import Path
 
 import pandas as pd
@@ -25,7 +26,11 @@ from src.utils.io import project_root
 
 
 def _env_token_status(root: Path) -> tuple[bool, bool]:
-    if str(os.getenv("TUSHARE_TOKEN", "")).strip():
+    return _env_key_status(root, "TUSHARE_TOKEN")
+
+
+def _env_key_status(root: Path, key_name: str) -> tuple[bool, bool]:
+    if str(os.getenv(key_name, "")).strip():
         return (root / ".env").exists(), True
 
     env_path = root / ".env"
@@ -38,7 +43,7 @@ def _env_token_status(root: Path) -> tuple[bool, bool]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        if key.strip() == "TUSHARE_TOKEN":
+        if key.strip() == key_name:
             token_configured = bool(value.strip())
             break
     return True, token_configured
@@ -72,6 +77,19 @@ def _frame_status(frame: pd.DataFrame, *, artifact_metadata: dict[str, object]) 
         "exists": bool(artifact_metadata),
         "rowCount": int(len(working)),
         "symbolCount": symbol_count,
+        "latestTradeDate": latest_trade_date,
+        "updatedAt": artifact_metadata.get("updated_at"),
+    }
+
+
+def _artifact_status(artifact_metadata: dict[str, object], *, dataset_summary: dict[str, object] | None = None) -> dict[str, object]:
+    fallback_summary = dataset_summary or {}
+    symbol_count = artifact_metadata.get("symbol_count") if "symbol_count" in artifact_metadata else fallback_summary.get("feature_symbols")
+    latest_trade_date = artifact_metadata.get("latest_trade_date") if "latest_trade_date" in artifact_metadata else fallback_summary.get("date_max")
+    return {
+        "exists": bool(artifact_metadata),
+        "rowCount": int(artifact_metadata.get("rows", 0) or 0),
+        "symbolCount": int(symbol_count or 0),
         "latestTradeDate": latest_trade_date,
         "updatedAt": artifact_metadata.get("updated_at"),
     }
@@ -151,5 +169,43 @@ def build_data_management_payload(
         "scripts": {
             "incremental": "scripts/refresh_daily_bar_tushare.ps1",
             "fullRefresh": "scripts/refresh_full_pipeline_tushare.ps1",
+        },
+    }
+
+
+def build_myquant_status_payload(
+    *,
+    root: Path | None = None,
+    include_sensitive: bool = True,
+) -> dict[str, object]:
+    resolved_root = root or project_root()
+    env_exists, token_configured = _env_key_status(resolved_root, "MYQUANT_TOKEN")
+    sdk_available = importlib.util.find_spec("gm") is not None
+    use_database_artifacts = _use_database_artifacts(resolved_root)
+    artifact_metadata = get_artifact_metadata(binary_artifact_key("myquant", "daily_bar")) if use_database_artifacts else {"updated_at": None}
+    if use_database_artifacts:
+        dataset_summary = load_dataset_summary(resolved_root, data_source="myquant", prefer_database=True)
+        daily_bar_status = _artifact_status(artifact_metadata, dataset_summary=dataset_summary)
+    else:
+        daily_bar = load_daily_bar(
+            resolved_root,
+            data_source="myquant",
+            prefer_database=False,
+        )
+        daily_bar_status = _frame_status(daily_bar, artifact_metadata=artifact_metadata)
+
+    quality_path = resolved_root / "data" / "staging" / "myquant_data_quality.json"
+    quality_exists = quality_path.exists()
+    return {
+        "targetSource": "myquant",
+        "envFileExists": env_exists,
+        "tokenConfigured": token_configured if include_sensitive else None,
+        "sdkAvailable": sdk_available,
+        "dailyBar": daily_bar_status,
+        "qualityReportExists": quality_exists,
+        "scripts": {
+            "download": "python -m src.data.myquant_downloader",
+            "enrich": "python -m src.data.myquant_enrich",
+            "researchRefresh": "python -m src.features.build_feature_panel",
         },
     }

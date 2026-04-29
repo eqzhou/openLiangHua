@@ -17,6 +17,7 @@ from src.app.facades import (
     get_ai_review_detail_payload,
     clear_cache_payload,
     get_data_management_payload,
+    get_myquant_status_payload,
     get_candidate_history_payload,
     get_candidate_detail_payload,
     generate_action_memo,
@@ -48,6 +49,9 @@ from src.app.facades import (
     get_watchlist_payload,
     get_watchlist_summary_payload,
     run_market_bars_refresh_payload,
+    run_myquant_download_payload,
+    run_myquant_enrich_payload,
+    run_myquant_research_refresh_payload,
     run_watchlist_research_refresh_payload,
     refresh_realtime_payload,
     run_tushare_full_refresh_payload,
@@ -77,6 +81,11 @@ class DataRefreshRequest(BaseModel):
     end_date: str | None = Field(default=None, max_length=20)
 
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(alias="oldPassword", min_length=1, max_length=200)
+    new_password: str = Field(alias="newPassword", min_length=1, max_length=200)
+
+
 def _build_auth_payload(user: AuthenticatedUser | None) -> dict[str, Any]:
     return {
         "authenticated": user is not None,
@@ -93,6 +102,17 @@ def _deep_merge_config(base: dict[str, Any], updates: dict[str, Any]) -> dict[st
         else:
             merged[key] = value
     return merged
+
+
+def _validate_new_password(value: str) -> None:
+    if len(value) < 8:
+        raise HTTPException(status_code=400, detail="New password is too weak.")
+    if not any(char.isalpha() for char in value) or not any(char.isdigit() for char in value):
+        raise HTTPException(status_code=400, detail="New password is too weak.")
+
+
+def _is_empty_watchlist_error(exc: RuntimeError) -> bool:
+    return "No symbols were provided and no watchlist_items symbols were found" in str(exc)
 
 
 settings = get_api_settings()
@@ -221,6 +241,22 @@ def post_auth_logout(
     return {"ok": True}
 
 
+@app.post("/api/auth/change-password")
+def post_auth_change_password(
+    payload: ChangePasswordRequest,
+    user: AuthenticatedUser = Depends(require_authenticated_user),
+    auth_store=Depends(get_auth_store),
+) -> dict[str, Any]:
+    _validate_new_password(payload.new_password)
+    try:
+        changed = auth_store.change_password(user.user_id, payload.old_password, payload.new_password)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Authentication service unavailable.") from exc
+    if not changed:
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+    return {"ok": True}
+
+
 @app.get("/api/shell")
 def get_shell(
     user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
@@ -322,6 +358,13 @@ def get_data_management(
     return get_data_management_payload(include_sensitive=user is not None)
 
 
+@app.get("/api/data-management/myquant-status")
+def get_myquant_status(
+    user: AuthenticatedUser | None = Depends(get_optional_authenticated_user),
+) -> dict[str, Any]:
+    return get_myquant_status_payload(include_sensitive=user is not None)
+
+
 @app.post("/api/data-management/tushare-refresh")
 def post_tushare_refresh(
     payload: DataRefreshRequest,
@@ -343,7 +386,12 @@ def post_market_bars_refresh(
     payload: DataRefreshRequest,
     user: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
-    return run_market_bars_refresh_payload(user_id=user.user_id, end_date=payload.end_date)
+    try:
+        return run_market_bars_refresh_payload(user_id=user.user_id, end_date=payload.end_date)
+    except RuntimeError as exc:
+        if _is_empty_watchlist_error(exc):
+            raise HTTPException(status_code=409, detail="观察池为空，请先添加持仓或重点观察标的。") from exc
+        raise
 
 
 @app.post("/api/data-management/watchlist-research-refresh")
@@ -352,6 +400,30 @@ def post_watchlist_research_refresh(
     user: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> dict[str, Any]:
     return run_watchlist_research_refresh_payload(user_id=user.user_id, target_source=payload.target_source)
+
+
+@app.post("/api/data-management/myquant-download")
+def post_myquant_download(
+    payload: DataRefreshRequest,
+    user: AuthenticatedUser = Depends(require_authenticated_user),
+) -> dict[str, Any]:
+    return run_myquant_download_payload(user_id=user.user_id, end_date=payload.end_date)
+
+
+@app.post("/api/data-management/myquant-enrich")
+def post_myquant_enrich(
+    payload: DataRefreshRequest,
+    user: AuthenticatedUser = Depends(require_authenticated_user),
+) -> dict[str, Any]:
+    return run_myquant_enrich_payload(user_id=user.user_id)
+
+
+@app.post("/api/data-management/myquant-research-refresh")
+def post_myquant_research_refresh(
+    payload: DataRefreshRequest,
+    user: AuthenticatedUser = Depends(require_authenticated_user),
+) -> dict[str, Any]:
+    return run_myquant_research_refresh_payload(user_id=user.user_id)
 
 
 @app.get("/api/overview")

@@ -20,6 +20,7 @@ from src.app.repositories.report_repository import (
 )
 from src.models.latest_inference import generate_latest_inference
 from src.utils.data_source import active_data_source
+from src.utils.data_source import normalize_data_source
 from src.utils.io import ensure_dir, project_root
 from src.utils.logger import configure_logging
 
@@ -52,21 +53,26 @@ def generate_overlay_inference_report(
     *,
     execute_llm: bool = True,
     user_id: str | None = None,
+    data_source: str | None = None,
 ) -> dict[str, object]:
     resolved_root = root or project_root()
     reports_dir = ensure_dir(resolved_root / "reports" / "weekly")
     experiment = load_experiment_config(resolved_root, prefer_database=True)
-    data_source = active_data_source()
+    resolved_data_source = normalize_data_source(data_source or active_data_source())
     overlay = _overlay_config(experiment)
 
     overlay_user_id = str(user_id or resolve_overlay_user_id()).strip()
-    inference_packet = generate_latest_inference(root=resolved_root, user_id=overlay_user_id)
-    lgbm = _load_prediction_frame(resolved_root, data_source, "lgbm_inference_predictions.csv", user_id=overlay_user_id)
-    ridge = _load_prediction_frame(resolved_root, data_source, "ridge_inference_predictions.csv", user_id=overlay_user_id)
+    inference_packet = generate_latest_inference(
+        root=resolved_root,
+        user_id=overlay_user_id,
+        data_source=resolved_data_source,
+    )
+    lgbm = _load_prediction_frame(resolved_root, resolved_data_source, "lgbm_inference_predictions.csv", user_id=overlay_user_id)
+    ridge = _load_prediction_frame(resolved_root, resolved_data_source, "ridge_inference_predictions.csv", user_id=overlay_user_id)
     candidate_symbols = load_overlay_symbol_universe(overlay_user_id)
     overlay_candidates, packet, markdown = build_overlay_report_from_frames(
         root=resolved_root,
-        data_source=data_source,
+        data_source=resolved_data_source,
         overlay=overlay,
         split_name="inference",
         lgbm=lgbm,
@@ -81,7 +87,7 @@ def generate_overlay_inference_report(
     export_frame = overlay_candidates[[column for column in DISPLAY_COLUMNS if column in overlay_candidates.columns]].copy()
     repo_save_overlay_outputs(
         root=resolved_root,
-        data_source=data_source,
+        data_source=resolved_data_source,
         scope="inference",
         candidates=export_frame,
         packet=packet,
@@ -93,14 +99,14 @@ def generate_overlay_inference_report(
         llm_artifacts = export_llm_requests(
             packet=packet,
             reports_dir=reports_dir,
-            data_source=data_source,
+            data_source=resolved_data_source,
             output_prefix="overlay_inference_llm",
             user_id=overlay_user_id,
         )
         packet["llm_bridge"] = llm_artifacts
         llm_bundle = load_overlay_llm_bundle(
             root=resolved_root,
-            data_source=data_source,
+            data_source=resolved_data_source,
             scope="inference",
             packet=packet,
             user_id=overlay_user_id,
@@ -110,7 +116,7 @@ def generate_overlay_inference_report(
             packet=packet,
             response_lookup=dict(llm_bundle.get("response_lookup", {}) or {}),
             root=resolved_root,
-            data_source=data_source,
+            data_source=resolved_data_source,
             user_id=overlay_user_id,
         )
         packet["shortlist"] = {
@@ -119,7 +125,7 @@ def generate_overlay_inference_report(
         }
         repo_save_overlay_outputs(
             root=resolved_root,
-            data_source=data_source,
+            data_source=resolved_data_source,
             scope="inference",
             candidates=export_frame,
             packet=packet,
@@ -129,11 +135,11 @@ def generate_overlay_inference_report(
 
     from src.db.dashboard_sync import sync_watchlist_snapshot_artifact
 
-    summary = sync_watchlist_snapshot_artifact(root=resolved_root, data_source=data_source, user_id=overlay_user_id)
+    summary = sync_watchlist_snapshot_artifact(root=resolved_root, data_source=resolved_data_source, user_id=overlay_user_id)
     logger.info(summary.message if summary.ok else f"Watchlist snapshot sync failed: {summary.message}")
     logger.info(f"Saved overlay inference reports to {reports_dir}")
     return {
-        "data_source": data_source,
+        "data_source": resolved_data_source,
         "latest_feature_date": inference_packet.get("latest_feature_date"),
         "inference_universe_size": inference_packet.get("inference_universe_size", 0),
         "candidate_count": int(len(export_frame)),

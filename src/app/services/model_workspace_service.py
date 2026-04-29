@@ -39,17 +39,24 @@ def _use_database_artifacts(root: Path) -> bool:
         return False
 
 
-def resolve_model_workspace(root: Path | None = None) -> ModelWorkspace:
+def resolve_model_workspace(root: Path | None = None, *, data_source: str | None = None) -> ModelWorkspace:
     resolved_root = root or project_root()
     universe: dict = {}
-    try:
-        universe = load_universe_config(resolved_root, prefer_database=True)
-        data_source = normalize_data_source(universe.get("data_source", active_data_source()))
-    except Exception:
-        data_source = active_data_source()
+    if data_source:
+        resolved_data_source = normalize_data_source(data_source)
+        try:
+            universe = load_universe_config(resolved_root, prefer_database=True)
+        except Exception:
+            universe = {}
+    else:
+        try:
+            universe = load_universe_config(resolved_root, prefer_database=True)
+            resolved_data_source = normalize_data_source(universe.get("data_source", active_data_source()))
+        except Exception:
+            resolved_data_source = active_data_source()
     experiment = load_experiment_config(resolved_root, prefer_database=True)
-    experiment["data_source"] = data_source
-    return ModelWorkspace(root=resolved_root, data_source=data_source, experiment=experiment, universe=universe)
+    experiment["data_source"] = resolved_data_source
+    return ModelWorkspace(root=resolved_root, data_source=resolved_data_source, experiment=experiment, universe=universe)
 
 
 def load_feature_label_panel(workspace: ModelWorkspace) -> tuple[pd.DataFrame, pd.DataFrame]:

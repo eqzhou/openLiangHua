@@ -14,9 +14,9 @@ This project is an A-share research and monitoring workspace with four linked la
 1. Daily market data ingestion.
 2. Point-in-time factor and label construction.
 3. Walk-forward model training and portfolio diagnostics.
-4. AI overlay + Streamlit dashboard for candidate review and watchlist monitoring.
+4. AI overlay + React/FastAPI dashboard for candidate review and watchlist monitoring, with Streamlit kept as a fallback surface.
 
-The current live configuration uses MyQuant as the active data source and keeps an A-share watchlist centered on `000078.SZ`.
+The current live configuration in `config/universe.yaml` uses Tushare as the active data source and keeps an A-share watchlist centered on `000078.SZ`. MyQuant remains an optional data route with status checks and manual Web task entrypoints.
 
 ## 2. Repository Layout
 
@@ -31,7 +31,9 @@ The current live configuration uses MyQuant as the active data source and keeps 
 
 ### App and operations
 
-- `streamlit_app.py`: the local dashboard entrypoint.
+- `web/`: the primary React operator UI.
+- `src/web_api/`: the primary FastAPI UI backend.
+- `streamlit_app.py`: the fallback dashboard entrypoint.
 - `scripts/start_streamlit.ps1`: dashboard supervisor launcher.
 - `scripts/stop_streamlit.ps1`: clean shutdown for supervisor plus managed listener processes.
 - `scripts/streamlit_status.ps1`: authoritative dashboard health/status check.
@@ -54,14 +56,14 @@ The current live configuration uses MyQuant as the active data source and keeps 
 ## 3. End-to-End Data Flow
 
 ```text
-MyQuant / AKShare / Tushare helpers
+Tushare / MyQuant / AKShare helpers
   -> data/staging/*daily_bar*.parquet + membership/snapshot tables
   -> data/features/*feature_panel.parquet
   -> data/labels/*label_panel.parquet
   -> ridge / lgbm walk-forward predictions + metrics + portfolios
   -> adaptive ensemble predictions + weights + stability summary
   -> AI overlay candidates + packet + markdown brief + optional LLM request/response artifacts
-  -> Streamlit dashboard + watchlist monitoring + manual holding notes
+  -> React/FastAPI dashboard + watchlist monitoring + manual holding notes + Streamlit fallback
 ```
 
 ## 4. Module Responsibilities
@@ -155,9 +157,9 @@ MyQuant / AKShare / Tushare helpers
 
 ## 5. Active Configuration Snapshot
 
-As of `2026-04-01`, the important live settings are:
+As of `2026-04-29`, the important live settings are:
 
-- Data source: `myquant`
+- Data source: `tushare`
 - Universe mode: `current_index`
 - Benchmark / active index: `000905.SH`
 - Label horizon: `ret_t1_t10`
@@ -226,9 +228,20 @@ Important nuance:
 
 ## 7. Dashboard Architecture
 
+### React + FastAPI primary surface
+
+- React is the daily operator UI.
+- FastAPI owns UI-facing payload contracts and write endpoints.
+- The data-management page exposes Tushare refresh actions plus optional MyQuant status/manual tasks.
+- The service page is a read-only health dashboard for FastAPI, React/Vite, PM2, Streamlit fallback, ports, and recent logs.
+- The local admin auth flow supports login/session/logout and current-admin password changes.
+- Watchlist configuration is maintained through Web APIs with per-user isolation; `ts_code + type` remains the immutable item identity.
+
+### Streamlit fallback
+
 ### Sidebar actions
 
-These buttons in `streamlit_app.py` call modules directly:
+These legacy buttons in `streamlit_app.py` call modules directly and are retained for fallback/inspection parity rather than new product growth:
 
 - `刷新部分面板` -> `src.data.materialize_cache`
 - `重建特征与标签` -> `src.features.build_feature_panel`
@@ -250,13 +263,14 @@ These buttons in `streamlit_app.py` call modules directly:
 - `AI研判`: now shows both the historical label-verified overlay snapshot and the newest unlabeled inference snapshot, each with event coverage, model weights, AI thesis, optional LLM prompts, and executed external-model results when available.
 - `观察持仓`: now backwrites multi-round LLM discussion summaries into the holding detail view, alongside historical verified rank and latest inference rank.
 - `观察持仓`: the summary table now includes a one-line `盘前执行建议` column that compresses multi-round discussion state plus key price levels into the first screen.
-- `运行日志`: downloader logs and dashboard service status.
+- `运行日志`: downloader logs and fallback dashboard service status.
 
 ### Service health source of truth
 
 - The dashboard no longer trusts stale PID files alone.
 - `scripts/streamlit_status.ps1` verifies supervisor PID, app PID, and port `8501`.
 - `streamlit_app.py` reads that script output and shows the real service state in the UI.
+- FastAPI `/api/service` additionally reports API/Web ports, PM2 process summaries, Streamlit fallback status, and recent logs for the React service page.
 
 ## 8. Operations Playbook
 
@@ -274,6 +288,8 @@ python -m src.agents.overlay_inference_report
 python -m src.agents.watch_plan
 python -m src.agents.action_memo
 ```
+
+For the current Tushare-first configuration, the Web data-management page can run the supported Tushare refresh actions directly. MyQuant remains optional and uses existing configuration plus an optional end date.
 
 ### Dashboard lifecycle
 

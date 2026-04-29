@@ -335,10 +335,15 @@ export const servicePageClient = {
 export const dataManagementClient = {
   queryKey: (): QueryKey => ['data-management'],
   path: (): string => '/api/data-management',
+  myquantStatusQueryKey: (): QueryKey => ['data-management', 'myquant-status'],
+  myquantStatusPath: (): string => '/api/data-management/myquant-status',
   marketBarsActionPath: (): string => '/api/data-management/market-bars-refresh',
   watchlistResearchActionPath: (): string => '/api/data-management/watchlist-research-refresh',
   incrementalActionPath: (): string => '/api/data-management/tushare-refresh',
   fullRefreshActionPath: (): string => '/api/data-management/full-refresh',
+  myquantDownloadActionPath: (): string => '/api/data-management/myquant-download',
+  myquantEnrichActionPath: (): string => '/api/data-management/myquant-enrich',
+  myquantResearchActionPath: (): string => '/api/data-management/myquant-research-refresh',
 }
 
 export const realtimeRefreshClient = {

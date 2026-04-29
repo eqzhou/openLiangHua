@@ -146,3 +146,152 @@ class DataManagementServiceTests(unittest.TestCase):
         self.assertEqual(payload["dailyBar"]["rowCount"], 3)
         self.assertEqual(payload["dailyBar"]["symbolCount"], 2)
         self.assertEqual(payload["dailyBar"]["latestTradeDate"], "2026-04-16")
+
+    def test_build_myquant_status_payload_reports_token_sdk_and_dataset(self) -> None:
+        from src.app.services.data_management_service import build_myquant_status_payload
+
+        with TemporaryDirectory() as temp_dir, patch.dict(os.environ, {}, clear=True):
+            root = Path(temp_dir)
+            (root / ".env").write_text("MYQUANT_TOKEN=myquant-token\n", encoding="utf-8")
+            staging_dir = root / "data" / "staging"
+            staging_dir.mkdir(parents=True)
+            pd.DataFrame(
+                [
+                    {"trade_date": "2026-04-15", "ts_code": "000001.SZ", "close": 10.2},
+                    {"trade_date": "2026-04-16", "ts_code": "000002.SZ", "close": 8.3},
+                ]
+            ).to_parquet(staging_dir / "myquant_daily_bar.parquet", index=False)
+
+            with patch("src.app.services.data_management_service.importlib.util.find_spec", return_value=object()):
+                payload = build_myquant_status_payload(root=root, include_sensitive=True)
+
+        self.assertTrue(payload["tokenConfigured"])
+        self.assertTrue(payload["sdkAvailable"])
+        self.assertEqual(payload["dailyBar"]["rowCount"], 2)
+        self.assertEqual(payload["dailyBar"]["symbolCount"], 2)
+        self.assertEqual(payload["dailyBar"]["latestTradeDate"], "2026-04-16")
+
+    def test_build_myquant_status_payload_uses_metadata_for_primary_database_mode(self) -> None:
+        from src.app.services.data_management_service import build_myquant_status_payload
+
+        with (
+            patch("src.app.services.data_management_service._use_database_artifacts", return_value=True),
+            patch("src.app.services.data_management_service.load_daily_bar", side_effect=AssertionError("should not load full daily bar")),
+            patch(
+                "src.app.services.data_management_service.get_artifact_metadata",
+                return_value={
+                    "rows": 123,
+                    "symbol_count": 5,
+                    "latest_trade_date": "2026-04-16",
+                    "updated_at": "2026-04-16T00:00:00",
+                },
+            ),
+            patch(
+                "src.app.services.data_management_service.load_dataset_summary",
+                return_value={"feature_symbols": 9, "date_max": "2026-04-18"},
+            ),
+            patch("src.app.services.data_management_service.importlib.util.find_spec", return_value=object()),
+        ):
+            payload = build_myquant_status_payload(root=Path("/Users/eqzhou/Public/openLiangHua"), include_sensitive=False)
+
+        self.assertEqual(payload["dailyBar"]["rowCount"], 123)
+        self.assertEqual(payload["dailyBar"]["symbolCount"], 5)
+        self.assertEqual(payload["dailyBar"]["latestTradeDate"], "2026-04-16")
+        self.assertEqual(payload["dailyBar"]["updatedAt"], "2026-04-16T00:00:00")
+
+    def test_build_myquant_status_payload_preserves_empty_metadata_values(self) -> None:
+        from src.app.services.data_management_service import build_myquant_status_payload
+
+        with (
+            patch("src.app.services.data_management_service._use_database_artifacts", return_value=True),
+            patch("src.app.services.data_management_service.load_daily_bar", side_effect=AssertionError("should not load full daily bar")),
+            patch(
+                "src.app.services.data_management_service.get_artifact_metadata",
+                return_value={
+                    "rows": 0,
+                    "symbol_count": 0,
+                    "latest_trade_date": None,
+                    "updated_at": "2026-04-16T00:00:00",
+                },
+            ),
+            patch(
+                "src.app.services.data_management_service.load_dataset_summary",
+                return_value={"feature_symbols": 5, "date_max": "2026-04-16"},
+            ),
+            patch("src.app.services.data_management_service.importlib.util.find_spec", return_value=object()),
+        ):
+            payload = build_myquant_status_payload(root=Path("/Users/eqzhou/Public/openLiangHua"), include_sensitive=False)
+
+        self.assertEqual(payload["dailyBar"]["rowCount"], 0)
+        self.assertEqual(payload["dailyBar"]["symbolCount"], 0)
+        self.assertIsNone(payload["dailyBar"]["latestTradeDate"])
+
+    def test_build_myquant_status_payload_falls_back_for_legacy_metadata(self) -> None:
+        from src.app.services.data_management_service import build_myquant_status_payload
+
+        with (
+            patch("src.app.services.data_management_service._use_database_artifacts", return_value=True),
+            patch("src.app.services.data_management_service.load_daily_bar", side_effect=AssertionError("should not load full daily bar")),
+            patch(
+                "src.app.services.data_management_service.get_artifact_metadata",
+                return_value={
+                    "rows": 123,
+                    "updated_at": "2026-04-16T00:00:00",
+                },
+            ),
+            patch(
+                "src.app.services.data_management_service.load_dataset_summary",
+                return_value={"feature_symbols": 5, "date_max": "2026-04-16"},
+            ),
+            patch("src.app.services.data_management_service.importlib.util.find_spec", return_value=object()),
+        ):
+            payload = build_myquant_status_payload(root=Path("/Users/eqzhou/Public/openLiangHua"), include_sensitive=False)
+
+        self.assertEqual(payload["dailyBar"]["rowCount"], 123)
+        self.assertEqual(payload["dailyBar"]["symbolCount"], 5)
+        self.assertEqual(payload["dailyBar"]["latestTradeDate"], "2026-04-16")
+
+    def test_build_myquant_status_payload_redacts_token_status_when_requested(self) -> None:
+        from src.app.services.data_management_service import build_myquant_status_payload
+
+        with TemporaryDirectory() as temp_dir, patch.dict(os.environ, {"MYQUANT_TOKEN": "runtime-token"}, clear=True):
+            root = Path(temp_dir)
+            with patch("src.app.services.data_management_service.importlib.util.find_spec", return_value=None):
+                payload = build_myquant_status_payload(root=root, include_sensitive=False)
+
+        self.assertIsNone(payload["tokenConfigured"])
+        self.assertFalse(payload["sdkAvailable"])
+
+    def test_myquant_action_error_payload_redacts_exception_text(self) -> None:
+        from src.app.facades.data_management_facade import run_myquant_enrich_payload
+
+        with (
+            patch("src.data.myquant_enrich.run", side_effect=RuntimeError("MYQUANT_TOKEN=secret-token failed")),
+            patch("src.app.facades.base.clear_dashboard_caches"),
+        ):
+            payload = run_myquant_enrich_payload(user_id="user-1")
+
+        self.assertFalse(payload["ok"])
+        self.assertIn("RuntimeError", payload["output"])
+        self.assertNotIn("secret-token", payload["output"])
+        self.assertNotIn("MYQUANT_TOKEN", payload["output"])
+
+    def test_myquant_research_refresh_passes_myquant_source_to_inference(self) -> None:
+        from src.app.facades.data_management_facade import run_myquant_research_refresh_payload
+
+        with (
+            patch(
+                "src.app.facades.data_management_facade.build_feature_label_artifacts",
+                return_value={"panel_rows": 3, "date_max": "2026-04-16"},
+            ) as build_features,
+            patch(
+                "src.app.facades.data_management_facade.generate_overlay_inference_report",
+                return_value={"latest_feature_date": "2026-04-16", "candidate_count": 2},
+            ) as generate_inference,
+            patch("src.app.facades.base.clear_dashboard_caches"),
+        ):
+            payload = run_myquant_research_refresh_payload(user_id="user-1")
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(build_features.call_args.kwargs["data_source"], "myquant")
+        self.assertEqual(generate_inference.call_args.kwargs["data_source"], "myquant")

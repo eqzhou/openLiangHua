@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -27,6 +28,12 @@ class DashboardDataServiceTests(unittest.TestCase):
         self.assertTrue(all("spinnerText" in action for action in actions))
         self.assertTrue(all("buttonKey" in action for action in actions))
         self.assertEqual(len({action["buttonKey"] for action in actions}), len(actions))
+
+    def test_action_specs_has_single_source_definition(self) -> None:
+        service_path = Path("src/app/services/dashboard_data_service.py")
+        source = service_path.read_text(encoding="utf-8")
+
+        self.assertEqual(source.count("ACTION_SPECS = ["), 1)
 
     def test_metrics_table_returns_dataframe(self) -> None:
         frame = build_metrics_table()

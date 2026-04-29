@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import copy
+import json
 import pandas as pd
+import shutil
+import socket
+import subprocess
 from typing import Any
 from functools import lru_cache
 
@@ -162,9 +166,93 @@ def get_shell_payload(user_id: str | None = None) -> dict[str, Any]:
     }
 
 
+def _port_status(port: int) -> dict[str, Any]:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.2)
+        available = sock.connect_ex(("127.0.0.1", port)) == 0
+    return {"port": port, "available": available}
+
+
+def _tail_file(path, *, max_chars: int = 4000) -> str:
+    try:
+        if not path.exists():
+            return ""
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+    return text[-max_chars:]
+
+
+def _pm2_status() -> dict[str, Any]:
+    if shutil.which("pm2") is None:
+        return {"available": False, "processes": [], "message": "pm2 not found"}
+    try:
+        result = subprocess.run(
+            ["pm2", "jlist"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        return {"available": False, "processes": [], "message": "pm2 jlist timed out"}
+    except OSError as exc:
+        return {"available": False, "processes": [], "message": f"pm2 jlist failed: {exc}"}
+    if result.returncode != 0:
+        return {"available": False, "processes": [], "message": result.stderr.strip() or "pm2 jlist failed"}
+    try:
+        raw_processes = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError:
+        return {"available": False, "processes": [], "message": "pm2 output parse failed"}
+    processes = []
+    for item in raw_processes:
+        if not isinstance(item, dict):
+            continue
+        env = item.get("pm2_env", {}) if isinstance(item.get("pm2_env"), dict) else {}
+        processes.append(
+            {
+                "name": item.get("name"),
+                "pid": item.get("pid"),
+                "status": env.get("status"),
+                "restartTime": env.get("restart_time"),
+                "uptime": env.get("pm_uptime"),
+            }
+        )
+    return {"available": True, "processes": processes, "message": ""}
+
+
+def build_service_health_payload() -> dict[str, Any]:
+    log_dir = ROOT / "logs"
+    pm2_log_dir = log_dir / "pm2"
+    api_status = _port_status(8989)
+    web_status = _port_status(5174)
+    return {
+        "apiStatus": {
+            **api_status,
+            "label": "FastAPI",
+        },
+        "webStatus": {
+            **web_status,
+            "label": "React/Vite",
+        },
+        "pm2Status": _pm2_status(),
+        "logs": {
+            "api": _tail_file(pm2_log_dir / "research_api.err.log") or _tail_file(log_dir / "research_api.err.log"),
+            "web": _tail_file(pm2_log_dir / "react_web.err.log") or _tail_file(log_dir / "react_web.err.log"),
+            "streamlitOut": _tail_file(log_dir / "streamlit.out.log"),
+            "streamlitErr": _tail_file(log_dir / "streamlit.err.log"),
+        },
+    }
+
+
 @lru_cache(maxsize=4)
 def _get_service_payload_cached(cache_bucket: int) -> dict[str, Any]:
-    payload = _json_ready(get_streamlit_service_status(ROOT))
+    streamlit_status = _json_ready(get_streamlit_service_status(ROOT))
+    health_payload = _json_ready(build_service_health_payload())
+    payload = dict(streamlit_status)
+    payload["streamlitStatus"] = streamlit_status
+    payload.update(health_payload)
     payload["realtime_snapshot"] = _get_realtime_snapshot_summary()
     payload["cache_bucket"] = cache_bucket
     return payload

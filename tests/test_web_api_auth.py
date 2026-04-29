@@ -32,6 +32,9 @@ class FakeAuthStore:
     def logout(self, session_token: str | None) -> None:
         return None
 
+    def change_password(self, user_id: str, old_password: str, new_password: str) -> bool:
+        return user_id == "user-1" and old_password == "secret" and new_password == "NewSecret123"
+
 
 class WebApiAuthTests(unittest.TestCase):
     @classmethod
@@ -145,6 +148,44 @@ class WebApiAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["includeSensitive"])
 
+    def test_market_bars_refresh_reports_empty_watchlist_as_business_error(self) -> None:
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "secret"},
+        )
+        self.assertEqual(login.status_code, 200)
+
+        with patch(
+            "src.web_api.app.run_market_bars_refresh_payload",
+            side_effect=RuntimeError("No symbols were provided and no watchlist_items symbols were found."),
+        ):
+            response = self.client.post("/api/data-management/market-bars-refresh", json={"target_source": "tushare"})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("观察池", response.json()["detail"])
+
+    def test_myquant_status_endpoint_requires_login_for_sensitive_fields(self) -> None:
+        with patch("src.web_api.app.get_myquant_status_payload", return_value={"tokenConfigured": None}) as status_payload:
+            response = self.client.get("/api/data-management/myquant-status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["tokenConfigured"])
+        self.assertFalse(status_payload.call_args.kwargs["include_sensitive"])
+
+    def test_myquant_actions_require_login_and_pass_user_scope(self) -> None:
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "secret"},
+        )
+        self.assertEqual(login.status_code, 200)
+
+        with patch("src.web_api.app.run_myquant_enrich_payload", return_value={"ok": True}) as enrich_payload:
+            response = self.client.post("/api/data-management/myquant-enrich", json={"target_source": "myquant"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(enrich_payload.call_args.kwargs["user_id"], "user-1")
+
     def test_experiment_config_update_deep_merges_nested_sections(self) -> None:
         login = self.client.post(
             "/api/auth/login",
@@ -248,6 +289,59 @@ class WebApiAuthTests(unittest.TestCase):
 
         self.assertEqual(logout.status_code, 200)
         self.assertIn("Max-Age=0", logout.headers.get("set-cookie", ""))
+
+    def test_change_password_requires_login(self) -> None:
+        response = self.client.post(
+            "/api/auth/change-password",
+            json={"oldPassword": "secret", "newPassword": "NewSecret123"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_change_password_rejects_weak_password(self) -> None:
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "secret"},
+        )
+        self.assertEqual(login.status_code, 200)
+
+        response = self.client.post(
+            "/api/auth/change-password",
+            json={"oldPassword": "secret", "newPassword": "short"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("secret", response.text)
+
+    def test_change_password_rejects_wrong_old_password(self) -> None:
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "secret"},
+        )
+        self.assertEqual(login.status_code, 200)
+
+        response = self.client.post(
+            "/api/auth/change-password",
+            json={"oldPassword": "wrong", "newPassword": "NewSecret123"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Current password is incorrect.")
+
+    def test_change_password_succeeds_after_login(self) -> None:
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "secret"},
+        )
+        self.assertEqual(login.status_code, 200)
+
+        response = self.client.post(
+            "/api/auth/change-password",
+            json={"oldPassword": "secret", "newPassword": "NewSecret123"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
 
 
 if __name__ == "__main__":
